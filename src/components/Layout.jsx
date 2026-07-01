@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   {
     to: '/projects',
     label: 'Projects',
+    permission: 'project.read',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   {
     to: '/events',
     label: 'Events',
+    permission: 'alarm.read',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -36,6 +38,7 @@ const NAV_ITEMS = [
   {
     to: '/settings',
     label: 'Settings',
+    permission: 'settings.read',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}

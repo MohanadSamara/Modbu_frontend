@@ -90,6 +90,17 @@ return () => setAuthFailedHandler(null);
     );
   }, [user]);
 
+  // Like hasPermission but passes if the user holds ANY of `keys`. Used where
+  // either a granular key or a legacy bundled key is acceptable — e.g. START
+  // is allowed by either 'device.start' or the legacy 'device.control'.
+  const hasAnyPermission = useCallback((keys, projectId = null) => {
+    if (!user?.permissions) return false;
+    const list = Array.isArray(keys) ? keys : [keys];
+    return user.permissions.some(
+      (p) => list.includes(p.key) && (p.projectId == null || p.projectId === projectId)
+    );
+  }, [user]);
+
   const hasRole = useCallback((roleKey) => {
     if (!user?.roles) return false;
     return user.roles.some((r) => r.key === roleKey);
@@ -105,10 +116,11 @@ return () => setAuthFailedHandler(null);
     logout,
     logoutAll,
     hasPermission,
+    hasAnyPermission,
     hasRole,
     refreshProfile,
     isAuthenticated: !!user,
-  }), [user, loading, error, login, logout, logoutAll, hasPermission, hasRole, refreshProfile]);
+  }), [user, loading, error, login, logout, logoutAll, hasPermission, hasAnyPermission, hasRole, refreshProfile]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

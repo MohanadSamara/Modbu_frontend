@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useAuth } from '../context/useAuth.js';
 
 const STAT_CARDS = [
   {
@@ -64,6 +65,7 @@ const QUICK_LINKS = [
     to: '/projects',
     label: 'Manage Projects',
     desc: 'Create locations, add and connect Modbus devices.',
+    permission: 'project.read',
     icon: (
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
@@ -77,6 +79,7 @@ const QUICK_LINKS = [
     to: '/events',
     label: 'View Events',
     desc: 'Browse device action logs and Modbus events.',
+    permission: 'alarm.read',
     icon: (
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
@@ -90,6 +93,7 @@ const QUICK_LINKS = [
     to: '/settings',
     label: 'Configure Settings',
     desc: 'Adjust alarms, connection timeouts and display options.',
+    permission: 'settings.read',
     icon: (
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
@@ -103,6 +107,10 @@ const QUICK_LINKS = [
 ];
 
 export default function Dashboard() {
+  const { hasPermission } = useAuth();
+  // Only surface shortcuts the user can actually open.
+  const quickLinks = QUICK_LINKS.filter((l) => !l.permission || hasPermission(l.permission));
+
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Hero */}
@@ -126,15 +134,17 @@ export default function Dashboard() {
           <p className="text-blue-100 text-base max-w-lg leading-relaxed">
             Industrial device monitoring and control. Manage projects, connect Modbus TCP devices, monitor fuel levels, and review event logs.
           </p>
-          <Link
-            to="/projects"
-            className="inline-flex items-center gap-2 mt-5 px-5 py-2.5 rounded-xl bg-white text-blue-700 text-sm font-semibold hover:bg-blue-50 transition-colors shadow-lg"
-          >
-            Open Projects
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
+          {hasPermission('project.read') && (
+            <Link
+              to="/projects"
+              className="inline-flex items-center gap-2 mt-5 px-5 py-2.5 rounded-xl bg-white text-blue-700 text-sm font-semibold hover:bg-blue-50 transition-colors shadow-lg"
+            >
+              Open Projects
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -157,13 +167,14 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Quick links */}
+      {/* Quick links — hidden entirely if the user can't open any of them */}
+      {quickLinks.length > 0 && (
       <div>
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4">
           Quick Access
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {QUICK_LINKS.map(({ to, label, desc, icon, accent, border }) => (
+          {quickLinks.map(({ to, label, desc, icon, accent, border }) => (
             <Link
               key={to}
               to={to}
@@ -188,6 +199,7 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Status footer */}
       <div className="rounded-2xl bg-[#1a1d27] border border-white/5 p-5 flex flex-wrap items-center gap-4">

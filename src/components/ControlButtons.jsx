@@ -1,10 +1,18 @@
 import { useState } from 'react';
 import modbusApi from '../api/modbus.js';
+import { useAuth } from '../context/useAuth.js';
 
 export default function ControlButtons({ className = '', isConnected = false }) {
+  const { hasAnyPermission } = useAuth();
+  const canStart = hasAnyPermission(['device.start', 'device.control']);
+  const canStop  = hasAnyPermission(['device.stop',  'device.control']);
+
   const [loading, setLoading] = useState({ start: false, stop: false });
   const [lastAction, setLastAction] = useState(null);
   const [actionError, setActionError] = useState('');
+
+  // If the user can't do either action, don't render the control card at all.
+  if (!canStart && !canStop) return null;
 
   const handleControl = async (action) => {
     setLoading((p) => ({ ...p, [action]: true }));
@@ -45,57 +53,61 @@ export default function ControlButtons({ className = '', isConnected = false }) 
         {isConnected ? 'Device connected — ready to send commands' : 'Connect a device to enable controls'}
       </div>
 
-      {/* Buttons */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Buttons — each only rendered if the user is allowed that action */}
+      <div className={`grid gap-3 ${canStart && canStop ? 'grid-cols-2' : 'grid-cols-1'}`}>
         {/* Start */}
-        <button
-          onClick={() => handleControl('start')}
-          disabled={loading.start || !isConnected}
-          className="relative overflow-hidden flex items-center justify-center gap-2.5 px-4 py-4 rounded-xl
-            bg-gradient-to-br from-emerald-600 to-teal-700
-            text-white text-sm font-bold
-            shadow-lg shadow-emerald-900/30
-            hover:from-emerald-500 hover:to-teal-600
-            disabled:opacity-40 disabled:cursor-not-allowed
-            active:scale-[0.98] transition-all duration-200"
-        >
-          {loading.start ? (
-            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          ) : (
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          )}
-          {loading.start ? 'Starting…' : 'Start'}
-        </button>
+        {canStart && (
+          <button
+            onClick={() => handleControl('start')}
+            disabled={loading.start || !isConnected}
+            className="relative overflow-hidden flex items-center justify-center gap-2.5 px-4 py-4 rounded-xl
+              bg-gradient-to-br from-emerald-600 to-teal-700
+              text-white text-sm font-bold
+              shadow-lg shadow-emerald-900/30
+              hover:from-emerald-500 hover:to-teal-600
+              disabled:opacity-40 disabled:cursor-not-allowed
+              active:scale-[0.98] transition-all duration-200"
+          >
+            {loading.start ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            )}
+            {loading.start ? 'Starting…' : 'Start'}
+          </button>
+        )}
 
         {/* Stop */}
-        <button
-          onClick={() => handleControl('stop')}
-          disabled={loading.stop || !isConnected}
-          className="relative overflow-hidden flex items-center justify-center gap-2.5 px-4 py-4 rounded-xl
-            bg-gradient-to-br from-red-600 to-rose-700
-            text-white text-sm font-bold
-            shadow-lg shadow-red-900/30
-            hover:from-red-500 hover:to-rose-600
-            disabled:opacity-40 disabled:cursor-not-allowed
-            active:scale-[0.98] transition-all duration-200"
-        >
-          {loading.stop ? (
-            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          ) : (
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6 6h12v12H6z" />
-            </svg>
-          )}
-          {loading.stop ? 'Stopping…' : 'Stop'}
-        </button>
+        {canStop && (
+          <button
+            onClick={() => handleControl('stop')}
+            disabled={loading.stop || !isConnected}
+            className="relative overflow-hidden flex items-center justify-center gap-2.5 px-4 py-4 rounded-xl
+              bg-gradient-to-br from-red-600 to-rose-700
+              text-white text-sm font-bold
+              shadow-lg shadow-red-900/30
+              hover:from-red-500 hover:to-rose-600
+              disabled:opacity-40 disabled:cursor-not-allowed
+              active:scale-[0.98] transition-all duration-200"
+          >
+            {loading.stop ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 6h12v12H6z" />
+              </svg>
+            )}
+            {loading.stop ? 'Stopping…' : 'Stop'}
+          </button>
+        )}
       </div>
 
       {/* Error */}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from '../context/useAuth.js';
 
 /* ─── icon helpers ─── */
 function ChevronIcon({ open }) {
@@ -44,6 +45,9 @@ export default function ProjectsSidebar({
   onCreateSubLocation, subLocationInputs, setSubLocationInputs,
   shouldShowDevice,
 }) {
+  const { hasPermission } = useAuth();
+  const canWriteProject = hasPermission('project.write');
+
   return (
     <aside className="lg:col-span-1 flex flex-col rounded-2xl bg-[#1a1d27] border border-white/5 overflow-hidden h-fit lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]">
       {/* Header */}
@@ -58,25 +62,27 @@ export default function ProjectsSidebar({
         <span className="ml-auto text-xs text-gray-600 font-mono">{projects.length}</span>
       </div>
 
-      {/* New project input */}
-      <div className="px-3 py-3 border-b border-white/5 flex-shrink-0">
-        <form onSubmit={onCreateProject} className="flex gap-2">
-          <input
-            type="text"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            placeholder="New project name…"
-            className="flex-1 px-3 py-2 rounded-xl bg-[#0f1117] border border-white/10 text-sm text-gray-200 placeholder-gray-600
-              focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/40 transition-colors"
-          />
-          <button
-            type="submit"
-            className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition-colors"
-          >
-            <PlusIcon />
-          </button>
-        </form>
-      </div>
+      {/* New project input — only for users who can create projects */}
+      {canWriteProject && (
+        <div className="px-3 py-3 border-b border-white/5 flex-shrink-0">
+          <form onSubmit={onCreateProject} className="flex gap-2">
+            <input
+              type="text"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="New project name…"
+              className="flex-1 px-3 py-2 rounded-xl bg-[#0f1117] border border-white/10 text-sm text-gray-200 placeholder-gray-600
+                focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/40 transition-colors"
+            />
+            <button
+              type="submit"
+              className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+            >
+              <PlusIcon />
+            </button>
+          </form>
+        </div>
+      )}
 
       {/* Tree */}
       <div className="flex-1 overflow-y-auto px-2 py-2">
@@ -132,6 +138,9 @@ function ProjectNode({
   onCreateSubLocation, subLocationInputs, setSubLocationInputs,
   shouldShowDevice,
 }) {
+  const { hasPermission } = useAuth();
+  const canWriteProject = hasPermission('project.write');
+
   const open = !!expandedProjects[project.id];
   const active = activeProjectId === project.id;
 
@@ -154,33 +163,37 @@ function ProjectNode({
           <span className="truncate text-sm font-semibold">{project.name}</span>
           <span className="ml-1 text-[10px] text-gray-600 flex-shrink-0">{project.locations.length}</span>
         </button>
-        <button
-          onClick={() => onDeleteProject(project.id)}
-          className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-1 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
-        >
-          <TrashIcon />
-        </button>
+        {canWriteProject && (
+          <button
+            onClick={() => onDeleteProject(project.id)}
+            className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-1 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
+          >
+            <TrashIcon />
+          </button>
+        )}
       </div>
 
       {open && (
         <div className="ml-4 border-l border-white/5 pl-3 mt-1 space-y-1">
           {/* Add location */}
-          <div className="flex gap-1.5 py-1">
-            <input
-              type="text"
-              value={locationInputs[project.id] ?? ''}
-              onChange={(e) => setLocationInputs((p) => ({ ...p, [project.id]: e.target.value }))}
-              placeholder="Add location…"
-              className="flex-1 px-2.5 py-1.5 rounded-lg bg-[#0f1117] border border-white/10 text-xs text-gray-300 placeholder-gray-600
-                focus:outline-none focus:ring-1 focus:ring-blue-500/30 focus:border-blue-500/40 transition-colors"
-            />
-            <button
-              onClick={() => onCreateLocation(project.id)}
-              className="px-2 py-1.5 rounded-lg bg-emerald-600/80 text-white hover:bg-emerald-500 transition-colors"
-            >
-              <PlusIcon />
-            </button>
-          </div>
+          {canWriteProject && (
+            <div className="flex gap-1.5 py-1">
+              <input
+                type="text"
+                value={locationInputs[project.id] ?? ''}
+                onChange={(e) => setLocationInputs((p) => ({ ...p, [project.id]: e.target.value }))}
+                placeholder="Add location…"
+                className="flex-1 px-2.5 py-1.5 rounded-lg bg-[#0f1117] border border-white/10 text-xs text-gray-300 placeholder-gray-600
+                  focus:outline-none focus:ring-1 focus:ring-blue-500/30 focus:border-blue-500/40 transition-colors"
+              />
+              <button
+                onClick={() => onCreateLocation(project.id)}
+                className="px-2 py-1.5 rounded-lg bg-emerald-600/80 text-white hover:bg-emerald-500 transition-colors"
+              >
+                <PlusIcon />
+              </button>
+            </div>
+          )}
 
           {project.locations.length === 0 ? (
             <p className="text-xs text-gray-600 px-1 pb-2">No locations yet.</p>
@@ -222,6 +235,10 @@ function LocationNode({
   onCreateSubLocation, subLocationInputs, setSubLocationInputs,
   shouldShowDevice,
 }) {
+  const { hasPermission } = useAuth();
+  const canWriteProject = hasPermission('project.write');
+  const canWriteDevice  = hasPermission('device.write');
+
   const open = !!expandedLocations[location.id];
   const active = activeLocationId === location.id;
   const childLocations = location.children ?? [];
@@ -248,33 +265,37 @@ function LocationNode({
           </svg>
           <span className="truncate text-xs font-medium">{location.name}</span>
         </button>
-        <button
-          onClick={() => onDeleteLocation(project.id, location.id)}
-          className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
-        >
-          <TrashIcon />
-        </button>
+        {canWriteProject && (
+          <button
+            onClick={() => onDeleteLocation(project.id, location.id)}
+            className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
+          >
+            <TrashIcon />
+          </button>
+        )}
       </div>
 
       {open && (
         <div className="ml-4 border-l border-white/5 pl-3 mt-0.5 space-y-1 pb-1">
           {/* Add sub-location */}
-          <div className="flex gap-1 pt-1">
-            <input
-              type="text"
-              value={subLocationInputs[location.id] ?? ''}
-              onChange={(e) => setSubLocationInputs((p) => ({ ...p, [location.id]: e.target.value }))}
-              placeholder="Sub-location…"
-              className="flex-1 px-2 py-1.5 rounded-lg bg-[#0f1117] border border-white/10 text-[11px] text-gray-300 placeholder-gray-600
-                focus:outline-none focus:ring-1 focus:ring-blue-500/30 transition-colors"
-            />
-            <button
-              onClick={() => onCreateSubLocation(project.id, location.id)}
-              className="px-2 py-1.5 rounded-lg bg-white/10 text-gray-300 hover:bg-white/20 transition-colors"
-            >
-              <PlusIcon />
-            </button>
-          </div>
+          {canWriteProject && (
+            <div className="flex gap-1 pt-1">
+              <input
+                type="text"
+                value={subLocationInputs[location.id] ?? ''}
+                onChange={(e) => setSubLocationInputs((p) => ({ ...p, [location.id]: e.target.value }))}
+                placeholder="Sub-location…"
+                className="flex-1 px-2 py-1.5 rounded-lg bg-[#0f1117] border border-white/10 text-[11px] text-gray-300 placeholder-gray-600
+                  focus:outline-none focus:ring-1 focus:ring-blue-500/30 transition-colors"
+              />
+              <button
+                onClick={() => onCreateSubLocation(project.id, location.id)}
+                className="px-2 py-1.5 rounded-lg bg-white/10 text-gray-300 hover:bg-white/20 transition-colors"
+              >
+                <PlusIcon />
+              </button>
+            </div>
+          )}
 
           {/* Child locations */}
           {childLocations.length > 0 && (
@@ -319,12 +340,14 @@ function LocationNode({
                         </svg>
                         <span className="truncate text-[11px] font-medium">{device.name}</span>
                       </button>
-                      <button
-                        onClick={() => onDeleteDevice(project.id, location.id, device.id)}
-                        className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                      >
-                        <TrashIcon />
-                      </button>
+                      {canWriteDevice && (
+                        <button
+                          onClick={() => onDeleteDevice(project.id, location.id, device.id)}
+                          className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                        >
+                          <TrashIcon />
+                        </button>
+                      )}
                     </div>
                   </li>
                 );
@@ -333,7 +356,7 @@ function LocationNode({
           )}
 
           {/* Add device form / button */}
-          {addingDeviceFor === location.id ? (
+          {canWriteDevice && (addingDeviceFor === location.id ? (
             <div className="rounded-xl bg-[#0f1117] border border-white/10 p-3 space-y-2 mt-1">
               {[
                 { field: 'name', placeholder: 'Device name', type: 'text' },
@@ -384,7 +407,7 @@ function LocationNode({
               <PlusIcon />
               Add device
             </button>
-          )}
+          ))}
         </div>
       )}
     </li>

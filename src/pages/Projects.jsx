@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import FuelGauge from '../components/FuelGauge.jsx';
 import ControlButtons from '../components/ControlButtons.jsx';
 import ProjectsSidebar from '../components/ProjectsSidebar.jsx';
+import Can from '../components/Can.jsx';
 import modbusApi from '../api/modbus.js';
 import { projectsApi, locationsApi, devicesApi } from '../api/projects.js';
 import { useSettings } from '../context/SettingsContext.jsx';
@@ -878,25 +879,27 @@ const location = { id: createId(), backendId, name, description: '', address: ''
                           >
                             Details
                           </button>
-                          {isConnected ? (
-                            <button
-                              type="button"
-                              onClick={() => handleDisconnectDevice(device.id)}
-                              disabled={isBusy}
-                              className="px-3 py-2 text-xs font-semibold rounded-xl bg-red-600/80 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
-                            >
-                              {isBusy ? '…' : 'Disconnect'}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleConnectDevice(device)}
-                              disabled={isBusy}
-                              className="px-3 py-2 text-xs font-semibold rounded-xl bg-emerald-600/80 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-                            >
-                              {isBusy ? '…' : 'Connect'}
-                            </button>
-                          )}
+                          <Can permission="device.connect">
+                            {isConnected ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDisconnectDevice(device.id)}
+                                disabled={isBusy}
+                                className="px-3 py-2 text-xs font-semibold rounded-xl bg-red-600/80 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+                              >
+                                {isBusy ? '…' : 'Disconnect'}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleConnectDevice(device)}
+                                disabled={isBusy}
+                                className="px-3 py-2 text-xs font-semibold rounded-xl bg-emerald-600/80 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                              >
+                                {isBusy ? '…' : 'Connect'}
+                              </button>
+                            )}
+                          </Can>
                         </div>
                       </div>
                     );
@@ -931,23 +934,25 @@ const location = { id: createId(), backendId, name, description: '', address: ''
                     )}
                   </div>
 
-                  {connectedDeviceId === selection.device.id ? (
-                    <button
-                      onClick={() => handleDisconnectDevice(selection.device.id)}
-                      disabled={connectingDeviceId === selection.device.id}
-                      className="flex-shrink-0 px-4 py-2 rounded-xl bg-red-600/80 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50 transition-colors"
-                    >
-                      {connectingDeviceId === selection.device.id ? 'Disconnecting…' : 'Disconnect'}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => handleConnectDevice(selection.device)}
-                      disabled={connectingDeviceId === selection.device.id}
-                      className="flex-shrink-0 px-4 py-2 rounded-xl bg-emerald-600/80 text-white text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-                    >
-                      {connectingDeviceId === selection.device.id ? 'Connecting…' : 'Connect'}
-                    </button>
-                  )}
+                  <Can permission="device.connect">
+                    {connectedDeviceId === selection.device.id ? (
+                      <button
+                        onClick={() => handleDisconnectDevice(selection.device.id)}
+                        disabled={connectingDeviceId === selection.device.id}
+                        className="flex-shrink-0 px-4 py-2 rounded-xl bg-red-600/80 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50 transition-colors"
+                      >
+                        {connectingDeviceId === selection.device.id ? 'Disconnecting…' : 'Disconnect'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleConnectDevice(selection.device)}
+                        disabled={connectingDeviceId === selection.device.id}
+                        className="flex-shrink-0 px-4 py-2 rounded-xl bg-emerald-600/80 text-white text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                      >
+                        {connectingDeviceId === selection.device.id ? 'Connecting…' : 'Connect'}
+                      </button>
+                    )}
+                  </Can>
                 </div>
 
                 {deviceConnectionErrors[selection.device.id] && (

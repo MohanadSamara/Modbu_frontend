@@ -47,7 +47,7 @@ function App() {
               <Route
                 path="projects"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredPermission="project.read">
                     <Projects />
                   </ProtectedRoute>
                 }
