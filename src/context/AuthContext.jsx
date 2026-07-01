@@ -21,6 +21,15 @@ import {
 // eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext(null);
 
+// Does a permission row satisfy the requested scope?
+//   projectId == null → context-free check: any scope counts (used for nav
+//                        links / route gates where no project is in context).
+//   projectId set      → global grant OR a grant for exactly that project.
+function permScopeMatches(p, projectId) {
+  if (projectId == null) return true;
+  return p.projectId == null || p.projectId === projectId;
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null);   // { id, username, email, fullName, roles, permissions }
   const [loading, setLoading] = useState(true);   // true while checking saved refresh token on first mount
@@ -81,13 +90,16 @@ return () => setAuthFailedHandler(null);
   }, [_hydrateFromMe]);
 
   // ── Permission helper ──────────────────────────────────────────────────
-  // Mirrors the backend rule: a user has permission `key` for project `pid`
-  // if any of their permission rows match key AND (projectId is null OR === pid).
+  // Two modes, chosen by whether the caller passes a specific project:
+  //   • projectId given  → project-aware: a global grant (projectId null) OR a
+  //     grant matching that project passes. Mirrors the backend rule.
+  //   • projectId omitted → context-free (nav links, route gates, "can this
+  //     user do X anywhere?"): a grant in ANY scope passes — global, or scoped
+  //     to any project/location/device. The precise per-scope enforcement is
+  //     done by the backend; here we only decide whether to reveal the UI.
   const hasPermission = useCallback((key, projectId = null) => {
     if (!user?.permissions) return false;
-    return user.permissions.some(
-      (p) => p.key === key && (p.projectId == null || p.projectId === projectId)
-    );
+    return user.permissions.some((p) => p.key === key && permScopeMatches(p, projectId));
   }, [user]);
 
   // Like hasPermission but passes if the user holds ANY of `keys`. Used where
@@ -96,9 +108,7 @@ return () => setAuthFailedHandler(null);
   const hasAnyPermission = useCallback((keys, projectId = null) => {
     if (!user?.permissions) return false;
     const list = Array.isArray(keys) ? keys : [keys];
-    return user.permissions.some(
-      (p) => list.includes(p.key) && (p.projectId == null || p.projectId === projectId)
-    );
+    return user.permissions.some((p) => list.includes(p.key) && permScopeMatches(p, projectId));
   }, [user]);
 
   const hasRole = useCallback((roleKey) => {
