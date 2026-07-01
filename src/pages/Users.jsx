@@ -14,7 +14,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { usersApi, rolesApi } from '../api/auth';
-import { projectsApi } from '../api/projects';
+import { projectsApi, locationsApi, devicesApi } from '../api/projects';
 import { useAuth } from '../context/useAuth.js';
 import Can from '../components/Can.jsx';
 
@@ -340,8 +340,49 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
 
   // Role grant form
   const [grantRoleKey,   setGrantRoleKey]   = useState(roles[0]?.key || '');
-  const [grantProjectId, setGrantProjectId] = useState('');
   const [grantingRole,   setGrantingRole]   = useState(false);
+
+  // Scope selection: global | project | location | device
+  const [scopeType,       setScopeType]       = useState('global');
+  const [scopeProjectId,  setScopeProjectId]  = useState('');
+  const [scopeLocationId, setScopeLocationId] = useState('');
+  const [scopeDeviceId,   setScopeDeviceId]   = useState('');
+  const [locations, setLocations] = useState([]); // flattened for chosen project
+  const [devices,   setDevices]   = useState([]); // for chosen location
+
+  // Load (and flatten) locations whenever a project is chosen for a
+  // location/device-scoped grant.
+  useEffect(() => {
+    if ((scopeType !== 'location' && scopeType !== 'device') || !scopeProjectId) {
+      setLocations([]);
+      return;
+    }
+    let alive = true;
+    locationsApi.listByProject(scopeProjectId)
+      .then((tree) => { if (alive) setLocations(flattenLocations(tree)); })
+      .catch(() => { if (alive) setLocations([]); });
+    return () => { alive = false; };
+  }, [scopeType, scopeProjectId]);
+
+  // Load devices whenever a location is chosen for a device-scoped grant.
+  useEffect(() => {
+    if (scopeType !== 'device' || !scopeLocationId) {
+      setDevices([]);
+      return;
+    }
+    let alive = true;
+    devicesApi.listByLocation(scopeLocationId)
+      .then((rows) => { if (alive) setDevices(rows || []); })
+      .catch(() => { if (alive) setDevices([]); });
+    return () => { alive = false; };
+  }, [scopeType, scopeLocationId]);
+
+  function resetScope(nextType) {
+    setScopeType(nextType);
+    setScopeProjectId('');
+    setScopeLocationId('');
+    setScopeDeviceId('');
+  }
 
   async function saveProfile() {
     setProfileErr(null);
@@ -355,10 +396,20 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
 
   async function grantRole() {
     if (!grantRoleKey) return;
+    // Build the one scope id the backend expects (at most one non-null).
+    let scope = null;
+    if (scopeType === 'project'  && scopeProjectId)  scope = { projectId:  Number(scopeProjectId) };
+    else if (scopeType === 'location' && scopeLocationId) scope = { locationId: Number(scopeLocationId) };
+    else if (scopeType === 'device'   && scopeDeviceId)   scope = { deviceId:   Number(scopeDeviceId) };
+
+    if (scopeType === 'project'  && !scopeProjectId)  { alert('Pick a project for the scope.');  return; }
+    if (scopeType === 'location' && !scopeLocationId) { alert('Pick a location for the scope.'); return; }
+    if (scopeType === 'device'   && !scopeDeviceId)   { alert('Pick a device for the scope.');   return; }
+
     setGrantingRole(true);
     try {
-      await usersApi.grantRole(user.id, grantRoleKey, grantProjectId ? Number(grantProjectId) : null);
-      setGrantProjectId('');
+      await usersApi.grantRole(user.id, grantRoleKey, scope);
+      resetScope('global');
       await onChange();
     } catch (e) { alert(e.detail || e.message); }
     finally { setGrantingRole(false); }
@@ -418,7 +469,10 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-blue-400 text-xs font-semibold">{r.name || r.key}</span>
                   <span className="text-gray-500 text-[10px] uppercase tracking-wider">
-                    {r.projectId ? `Project #${r.projectId}` : 'Global'}
+                    {r.deviceId ? `Device #${r.deviceId}`
+                      : r.locationId ? `Location #${r.locationId}`
+                      : r.projectId ? `Project #${r.projectId}`
+                      : 'Global'}
                   </span>
                 </div>
                 <button onClick={() => revokeRole(r.userRoleId)}
@@ -430,29 +484,68 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
           {/* Grant new */}
           <div className="border-t border-white/5 pt-3">
             <div className="text-xs text-gray-500 mb-2">Grant new role</div>
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="flex-1 min-w-[120px]">
-                <Field label="Role">
-                  <select value={grantRoleKey} onChange={(e) => setGrantRoleKey(e.target.value)} className={inputCls}>
-                    {roles.map((r) => (
-                      <option key={r.key} value={r.key}>{r.name} ({r.key})</option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-              <div className="flex-1 min-w-[120px]">
-                <Field label="Scope">
-                  <select value={grantProjectId} onChange={(e) => setGrantProjectId(e.target.value)} className={inputCls}>
-                    <option value="">Global (all projects)</option>
+            <div className="space-y-2">
+              <Field label="Role">
+                <select value={grantRoleKey} onChange={(e) => setGrantRoleKey(e.target.value)} className={inputCls}>
+                  {roles.map((r) => (
+                    <option key={r.key} value={r.key}>{r.name} ({r.key})</option>
+                  ))}
+                </select>
+              </Field>
+
+              {/* Scope level */}
+              <Field label="Scope level">
+                <select value={scopeType} onChange={(e) => resetScope(e.target.value)} className={inputCls}>
+                  <option value="global">Global (everywhere)</option>
+                  <option value="project">A single project</option>
+                  <option value="location">A single location</option>
+                  <option value="device">A single device</option>
+                </select>
+              </Field>
+
+              {/* Project picker — for project/location/device scope */}
+              {scopeType !== 'global' && (
+                <Field label="Project">
+                  <select value={scopeProjectId}
+                    onChange={(e) => { setScopeProjectId(e.target.value); setScopeLocationId(''); setScopeDeviceId(''); }}
+                    className={inputCls}>
+                    <option value="">— select project —</option>
                     {projects.map((p) => (
                       <option key={p.ID || p.id} value={p.ID || p.id}>{p.NAME || p.name}</option>
                     ))}
                   </select>
                 </Field>
-              </div>
+              )}
+
+              {/* Location picker — for location/device scope */}
+              {(scopeType === 'location' || scopeType === 'device') && scopeProjectId && (
+                <Field label="Location">
+                  <select value={scopeLocationId}
+                    onChange={(e) => { setScopeLocationId(e.target.value); setScopeDeviceId(''); }}
+                    className={inputCls}>
+                    <option value="">— select location —</option>
+                    {locations.map((l) => (
+                      <option key={l.id} value={l.id}>{' '.repeat((l.depth - 1) * 2)}{l.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              {/* Device picker — for device scope */}
+              {scopeType === 'device' && scopeLocationId && (
+                <Field label="Device">
+                  <select value={scopeDeviceId} onChange={(e) => setScopeDeviceId(e.target.value)} className={inputCls}>
+                    <option value="">— select device —</option>
+                    {devices.map((d) => (
+                      <option key={d.id || d.ID} value={d.id || d.ID}>{d.name || d.NAME}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
               <button onClick={grantRole} disabled={grantingRole}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-700/40 text-white text-sm font-semibold rounded-lg">
-                {grantingRole ? 'Granting…' : 'Grant'}
+                className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-700/40 text-white text-sm font-semibold rounded-lg">
+                {grantingRole ? 'Granting…' : 'Grant role'}
               </button>
             </div>
           </div>
@@ -463,6 +556,17 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
 }
 
 // ── Tiny shared bits ──────────────────────────────────────────────────────
+
+// The /projects/:id/locations endpoint returns a nested tree. Flatten it to a
+// list (keeping `depth` for indentation) so it can populate a <select>.
+function flattenLocations(tree, out = []) {
+  for (const node of tree || []) {
+    out.push({ id: node.id, name: node.name, depth: node.depth || 1 });
+    if (node.children?.length) flattenLocations(node.children, out);
+  }
+  return out;
+}
+
 const inputCls =
   'w-full px-3 py-2 bg-[#0f1117] border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500';
 

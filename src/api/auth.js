@@ -70,13 +70,25 @@ export const usersApi = {
   lock:   (id) => request(`/users/${id}/lock`,   { method: 'POST', prefix: 'Lock failed', timeoutMs: 30000 }),
   unlock: (id) => request(`/users/${id}/unlock`, { method: 'POST', prefix: 'Unlock failed', timeoutMs: 30000 }),
 
-  grantRole: (id, roleKey, projectId = null) =>
-    request(`/users/${id}/roles`, {
+  /**
+   * Grant a role, optionally scoped. `scope` is { projectId?, locationId?,
+   * deviceId? } — pass at most one. A bare number is treated as projectId for
+   * backward compatibility.
+   */
+  grantRole: (id, roleKey, scope = null) => {
+    const s = typeof scope === 'object' && scope !== null ? scope : { projectId: scope };
+    return request(`/users/${id}/roles`, {
       method: 'POST',
-      body: { roleKey, projectId },
+      body: {
+        roleKey,
+        projectId:  s.projectId  ?? null,
+        locationId: s.locationId ?? null,
+        deviceId:   s.deviceId   ?? null,
+      },
       prefix: 'Failed to grant role',
       timeoutMs: 30000,
-    }),
+    });
+  },
 
   revokeRole: (id, userRoleId) =>
     request(`/users/${id}/roles/${userRoleId}`, {
