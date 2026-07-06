@@ -27,6 +27,18 @@ function PlusIcon() {
     </svg>
   );
 }
+function PencilIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
+  );
+}
+
+// Small inline text input used by the edit forms in the tree.
+const treeInput =
+  'w-full px-2 py-1 rounded-lg bg-[#0f1117] border border-white/10 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500/40 focus:border-blue-500/40 transition-colors';
 
 export default function ProjectsSidebar({
   projects,
@@ -39,14 +51,16 @@ export default function ProjectsSidebar({
   locationInputs, setLocationInputs,
   onCreateLocation,
   onDeleteProject, onDeleteLocation, onDeleteDevice,
-  connectedDeviceId,
+  onUpdateProject, onUpdateLocation, onUpdateDevice,
+  connectedDeviceIds,
   addingDeviceFor, startAddDevice, cancelAddDevice,
   deviceDrafts, deviceErrors, updateDeviceDraft, onCreateDevice,
+  brands,
   onCreateSubLocation, subLocationInputs, setSubLocationInputs,
   shouldShowDevice,
 }) {
-  const { hasPermission } = useAuth();
-  const canWriteProject = hasPermission('project.write');
+  const { canFeature } = useAuth();
+  const canWriteProject = canFeature('button.project.write');
 
   return (
     <aside className="lg:col-span-1 flex flex-col rounded-2xl bg-[#1a1d27] border border-white/5 overflow-hidden h-fit lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]">
@@ -110,9 +124,11 @@ export default function ProjectsSidebar({
                 locationInputs={locationInputs} setLocationInputs={setLocationInputs}
                 onCreateLocation={onCreateLocation}
                 onDeleteProject={onDeleteProject} onDeleteLocation={onDeleteLocation} onDeleteDevice={onDeleteDevice}
-                connectedDeviceId={connectedDeviceId}
+                onUpdateProject={onUpdateProject} onUpdateLocation={onUpdateLocation} onUpdateDevice={onUpdateDevice}
+                connectedDeviceIds={connectedDeviceIds}
                 addingDeviceFor={addingDeviceFor} startAddDevice={startAddDevice} cancelAddDevice={cancelAddDevice}
                 deviceDrafts={deviceDrafts} deviceErrors={deviceErrors} updateDeviceDraft={updateDeviceDraft} onCreateDevice={onCreateDevice}
+                brands={brands}
                 onCreateSubLocation={onCreateSubLocation} subLocationInputs={subLocationInputs} setSubLocationInputs={setSubLocationInputs}
                 shouldShowDevice={shouldShowDevice}
               />
@@ -132,20 +148,37 @@ function ProjectNode({
   setActiveProjectId, setActiveLocationId, setActiveDeviceId,
   locationInputs, setLocationInputs, onCreateLocation,
   onDeleteProject, onDeleteLocation, onDeleteDevice,
-  connectedDeviceId,
+  onUpdateProject, onUpdateLocation, onUpdateDevice,
+  connectedDeviceIds,
   addingDeviceFor, startAddDevice, cancelAddDevice,
   deviceDrafts, deviceErrors, updateDeviceDraft, onCreateDevice,
+  brands,
   onCreateSubLocation, subLocationInputs, setSubLocationInputs,
   shouldShowDevice,
 }) {
-  const { hasPermission } = useAuth();
-  const canWriteProject = hasPermission('project.write');
+  const { canFeature, canUseElement } = useAuth();
+  const canWriteProject = canFeature('button.project.write');
+  const canEditProject = canWriteProject && canUseElement('project.rename');
 
   const open = !!expandedProjects[project.id];
   const active = activeProjectId === project.id;
 
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(project.name);
+  const [editErr, setEditErr] = useState('');
+
+  const startEdit = () => { setDraft(project.name); setEditErr(''); setEditing(true); };
+  const saveEdit = async () => {
+    const res = await onUpdateProject(project.id, { name: draft });
+    if (res?.ok) setEditing(false); else setEditErr(res?.error || 'Update failed');
+  };
+
   return (
     <li>
+      {editing ? (
+        <InlineEditRow value={draft} onChange={setDraft} onSave={saveEdit}
+          onCancel={() => setEditing(false)} error={editErr} />
+      ) : (
       <div className={`group flex items-center gap-1.5 px-2 py-2 rounded-xl transition-colors
         ${active ? 'bg-blue-500/10 text-blue-300' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'}`}
       >
@@ -163,6 +196,15 @@ function ProjectNode({
           <span className="truncate text-sm font-semibold">{project.name}</span>
           <span className="ml-1 text-[10px] text-gray-600 flex-shrink-0">{project.locations.length}</span>
         </button>
+        {canEditProject && (
+          <button
+            onClick={startEdit}
+            title="Edit project"
+            className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-1 rounded-lg text-gray-600 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+          >
+            <PencilIcon />
+          </button>
+        )}
         {canWriteProject && (
           <button
             onClick={() => onDeleteProject(project.id)}
@@ -172,6 +214,7 @@ function ProjectNode({
           </button>
         )}
       </div>
+      )}
 
       {open && (
         <div className="ml-4 border-l border-white/5 pl-3 mt-1 space-y-1">
@@ -207,9 +250,11 @@ function ProjectNode({
                   activeLocationId={activeLocationId} activeDeviceId={activeDeviceId}
                   setActiveProjectId={setActiveProjectId} setActiveLocationId={setActiveLocationId} setActiveDeviceId={setActiveDeviceId}
                   onDeleteLocation={onDeleteLocation} onDeleteDevice={onDeleteDevice}
-                  connectedDeviceId={connectedDeviceId}
+                  onUpdateLocation={onUpdateLocation} onUpdateDevice={onUpdateDevice}
+                  connectedDeviceIds={connectedDeviceIds}
                   addingDeviceFor={addingDeviceFor} startAddDevice={startAddDevice} cancelAddDevice={cancelAddDevice}
                   deviceDrafts={deviceDrafts} deviceErrors={deviceErrors} updateDeviceDraft={updateDeviceDraft} onCreateDevice={onCreateDevice}
+                  brands={brands}
                   onCreateSubLocation={onCreateSubLocation} subLocationInputs={subLocationInputs} setSubLocationInputs={setSubLocationInputs}
                   shouldShowDevice={shouldShowDevice}
                 />
@@ -229,25 +274,41 @@ function LocationNode({
   activeLocationId, activeDeviceId,
   setActiveProjectId, setActiveLocationId, setActiveDeviceId,
   onDeleteLocation, onDeleteDevice,
-  connectedDeviceId,
+  onUpdateLocation, onUpdateDevice,
+  connectedDeviceIds,
   addingDeviceFor, startAddDevice, cancelAddDevice,
   deviceDrafts, deviceErrors, updateDeviceDraft, onCreateDevice,
+  brands,
   onCreateSubLocation, subLocationInputs, setSubLocationInputs,
   shouldShowDevice,
 }) {
-  const { hasPermission } = useAuth();
-  const canWriteProject = hasPermission('project.write');
-  const canWriteDevice  = hasPermission('device.write');
+  const { canFeature, canUseElement } = useAuth();
+  const canWriteProject = canFeature('button.project.write');
+  const canWriteDevice  = canFeature('button.device.write');
+  const canEditLocation = canWriteProject && canUseElement('project.rename');
 
   const open = !!expandedLocations[location.id];
   const active = activeLocationId === location.id;
   const childLocations = location.children ?? [];
   const visibleDevices = (location.devices ?? []).filter(shouldShowDevice);
-  const draft = deviceDrafts[location.id] ?? { name: '', ip: '', port: 502, description: '' };
+  const draft = deviceDrafts[location.id] ?? { name: '', ip: '', port: 502, description: '', latitude: '', longitude: '' };
   const errs = deviceErrors[location.id] ?? {};
+
+  const [editing, setEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState(location.name);
+  const [editErr, setEditErr] = useState('');
+  const startEdit = () => { setNameDraft(location.name); setEditErr(''); setEditing(true); };
+  const saveEdit = async () => {
+    const res = await onUpdateLocation(project.id, location.id, { name: nameDraft });
+    if (res?.ok) setEditing(false); else setEditErr(res?.error || 'Update failed');
+  };
 
   return (
     <li>
+      {editing ? (
+        <InlineEditRow value={nameDraft} onChange={setNameDraft} onSave={saveEdit}
+          onCancel={() => setEditing(false)} error={editErr} />
+      ) : (
       <div className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-xl transition-colors
         ${active ? 'bg-blue-500/10 text-blue-300' : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'}`}
       >
@@ -265,6 +326,15 @@ function LocationNode({
           </svg>
           <span className="truncate text-xs font-medium">{location.name}</span>
         </button>
+        {canEditLocation && (
+          <button
+            onClick={startEdit}
+            title="Edit location"
+            className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+          >
+            <PencilIcon />
+          </button>
+        )}
         {canWriteProject && (
           <button
             onClick={() => onDeleteLocation(project.id, location.id)}
@@ -274,6 +344,7 @@ function LocationNode({
           </button>
         )}
       </div>
+      )}
 
       {open && (
         <div className="ml-4 border-l border-white/5 pl-3 mt-0.5 space-y-1 pb-1">
@@ -308,9 +379,11 @@ function LocationNode({
                   activeLocationId={activeLocationId} activeDeviceId={activeDeviceId}
                   setActiveProjectId={setActiveProjectId} setActiveLocationId={setActiveLocationId} setActiveDeviceId={setActiveDeviceId}
                   onDeleteLocation={onDeleteLocation} onDeleteDevice={onDeleteDevice}
-                  connectedDeviceId={connectedDeviceId}
+                  onUpdateLocation={onUpdateLocation} onUpdateDevice={onUpdateDevice}
+                  connectedDeviceIds={connectedDeviceIds}
                   addingDeviceFor={addingDeviceFor} startAddDevice={startAddDevice} cancelAddDevice={cancelAddDevice}
                   deviceDrafts={deviceDrafts} deviceErrors={deviceErrors} updateDeviceDraft={updateDeviceDraft} onCreateDevice={onCreateDevice}
+                  brands={brands}
                   onCreateSubLocation={onCreateSubLocation} subLocationInputs={subLocationInputs} setSubLocationInputs={setSubLocationInputs}
                   shouldShowDevice={shouldShowDevice}
                 />
@@ -321,37 +394,18 @@ function LocationNode({
           {/* Devices */}
           {visibleDevices.length > 0 && (
             <ul className="space-y-0.5 pt-0.5">
-              {visibleDevices.map((device) => {
-                const isActive = activeDeviceId === device.id;
-                const isConn = connectedDeviceId === device.id;
-                return (
-                  <li key={device.id}>
-                    <div className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-xl transition-colors
-                      ${isActive ? 'bg-indigo-500/10 text-indigo-300' : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'}`}
-                    >
-                      <button
-                        className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
-                        onClick={() => { setActiveProjectId(project.id); setActiveLocationId(location.id); setActiveDeviceId(device.id); }}
-                      >
-                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isConn ? 'bg-emerald-400 animate-pulse' : 'bg-gray-700'}`} />
-                        <svg className="w-3.5 h-3.5 flex-shrink-0 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-                            d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                        </svg>
-                        <span className="truncate text-[11px] font-medium">{device.name}</span>
-                      </button>
-                      {canWriteDevice && (
-                        <button
-                          onClick={() => onDeleteDevice(project.id, location.id, device.id)}
-                          className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                        >
-                          <TrashIcon />
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
+              {visibleDevices.map((device) => (
+                <DeviceNode
+                  key={device.id}
+                  project={project} location={location} device={device}
+                  isActive={activeDeviceId === device.id}
+                  isConn={connectedDeviceIds.has(device.id)}
+                  setActiveProjectId={setActiveProjectId} setActiveLocationId={setActiveLocationId} setActiveDeviceId={setActiveDeviceId}
+                  onDeleteDevice={onDeleteDevice} onUpdateDevice={onUpdateDevice}
+                  canWriteDevice={canWriteDevice}
+                  brands={brands}
+                />
+              ))}
             </ul>
           )}
 
@@ -362,6 +416,8 @@ function LocationNode({
                 { field: 'name', placeholder: 'Device name', type: 'text' },
                 { field: 'ip', placeholder: 'IP (e.g. 192.168.1.100)', type: 'text' },
                 { field: 'port', placeholder: 'Port', type: 'number' },
+                { field: 'latitude', placeholder: 'Latitude (optional, e.g. 31.9539)', type: 'number' },
+                { field: 'longitude', placeholder: 'Longitude (optional, e.g. 35.9106)', type: 'number' },
               ].map(({ field, placeholder, type }) => (
                 <div key={field}>
                   <input
@@ -384,6 +440,17 @@ function LocationNode({
                 className="w-full px-2.5 py-1.5 rounded-lg text-xs text-gray-200 placeholder-gray-600 bg-[#1a1d27] border border-white/10
                   focus:outline-none focus:ring-1 focus:ring-blue-500/30 transition-colors resize-none"
               />
+              <select
+                value={draft.brandId ?? ''}
+                onChange={(e) => updateDeviceDraft(location.id, 'brandId', e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg text-xs text-gray-200 bg-[#1a1d27] border border-white/10
+                  focus:outline-none focus:ring-1 focus:ring-blue-500/30 transition-colors cursor-pointer"
+              >
+                <option value="" className="bg-[#1a1d27]">Brand (optional)</option>
+                {(brands ?? []).map((b) => (
+                  <option key={b.id} value={b.id} className="bg-[#1a1d27]">{b.name}</option>
+                ))}
+              </select>
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={() => onCreateDevice(project.id, location.id)}
@@ -411,5 +478,155 @@ function LocationNode({
         </div>
       )}
     </li>
+  );
+}
+
+/* ─── DeviceNode ─── */
+// One device row with an inline "edit details" form (name / IP / port).
+function DeviceNode({
+  project, location, device,
+  isActive, isConn,
+  setActiveProjectId, setActiveLocationId, setActiveDeviceId,
+  onDeleteDevice, onUpdateDevice, canWriteDevice, brands,
+}) {
+  const { canUseElement } = useAuth();
+  const canEditDevice = canWriteDevice && canUseElement('device.edit');
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ name: '', ip: '', port: 502, description: '', latitude: '', longitude: '', brandId: '' });
+  const [editErr, setEditErr] = useState('');
+
+  const startEdit = () => {
+    setDraft({
+      name: device.name ?? '',
+      ip: device.ip ?? '',
+      port: device.port ?? 502,
+      description: device.description ?? '',
+      latitude: device.latitude ?? '',
+      longitude: device.longitude ?? '',
+      brandId: device.brandId ?? '',
+    });
+    setEditErr('');
+    setEditing(true);
+  };
+  const saveEdit = async () => {
+    const res = await onUpdateDevice(project.id, location.id, device, draft);
+    if (res?.ok) setEditing(false); else setEditErr(res?.error || 'Update failed');
+  };
+
+  if (editing) {
+    return (
+      <li>
+        <div className="rounded-xl bg-[#0f1117] border border-white/10 p-2.5 space-y-2 mt-0.5">
+          <input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+            placeholder="Device name" className={treeInput} autoFocus />
+          <div className="flex gap-2">
+            <input value={draft.ip} onChange={(e) => setDraft((d) => ({ ...d, ip: e.target.value }))}
+              placeholder="IP" className={`${treeInput} font-mono`} />
+            <input type="number" value={draft.port} onChange={(e) => setDraft((d) => ({ ...d, port: e.target.value }))}
+              placeholder="Port" className={`${treeInput} font-mono w-20`} />
+          </div>
+          <input value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+            placeholder="Description (optional)" className={treeInput} />
+          <div className="flex gap-2">
+            <input type="number" step="any" value={draft.latitude}
+              onChange={(e) => setDraft((d) => ({ ...d, latitude: e.target.value }))}
+              placeholder="Latitude" className={`${treeInput} font-mono`} />
+            <input type="number" step="any" value={draft.longitude}
+              onChange={(e) => setDraft((d) => ({ ...d, longitude: e.target.value }))}
+              placeholder="Longitude" className={`${treeInput} font-mono`} />
+          </div>
+          <select
+            value={draft.brandId ?? ''}
+            onChange={(e) => setDraft((d) => ({ ...d, brandId: e.target.value }))}
+            className={`${treeInput} cursor-pointer`}
+          >
+            <option value="" className="bg-[#0f1117]">Brand (optional)</option>
+            {(brands ?? []).map((b) => (
+              <option key={b.id} value={b.id} className="bg-[#0f1117]">{b.name}</option>
+            ))}
+          </select>
+          {editErr && <p className="text-[10px] text-red-400">{editErr}</p>}
+          <div className="flex gap-2 pt-0.5">
+            <button onClick={saveEdit}
+              className="flex-1 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-colors">
+              Save
+            </button>
+            <button onClick={() => setEditing(false)}
+              className="px-3 py-1.5 rounded-lg bg-white/10 text-gray-300 text-xs hover:bg-white/20 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </li>
+    );
+  }
+
+  return (
+    <li>
+      <div className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-xl transition-colors
+        ${isActive ? 'bg-indigo-500/10 text-indigo-300' : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'}`}
+      >
+        <button
+          className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
+          onClick={() => { setActiveProjectId(project.id); setActiveLocationId(location.id); setActiveDeviceId(device.id); }}
+        >
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isConn ? 'bg-emerald-400 animate-pulse' : 'bg-gray-700'}`} />
+          <svg className="w-3.5 h-3.5 flex-shrink-0 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+              d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+          </svg>
+          <span className="truncate text-[11px] font-medium">{device.name}</span>
+        </button>
+        {canEditDevice && (
+          <button
+            onClick={startEdit}
+            title="Edit device"
+            className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+          >
+            <PencilIcon />
+          </button>
+        )}
+        {canWriteDevice && (
+          <button
+            onClick={() => onDeleteDevice(project.id, location.id, device.id)}
+            className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
+          >
+            <TrashIcon />
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/* ─── InlineEditRow ─── */
+// A compact rename row (single text input + Save / Cancel) used for projects
+// and locations. Enter saves, Escape cancels.
+function InlineEditRow({ value, onChange, onSave, onCancel, error }) {
+  return (
+    <div className="rounded-xl bg-[#0f1117] border border-white/10 p-2 space-y-1.5">
+      <div className="flex gap-1.5">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); onSave(); }
+            if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+          }}
+          className={treeInput}
+          autoFocus
+        />
+        <button onClick={onSave}
+          className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-colors">
+          Save
+        </button>
+        <button onClick={onCancel}
+          className="px-2 py-1 rounded-lg bg-white/10 text-gray-300 text-xs hover:bg-white/20 transition-colors">
+          Cancel
+        </button>
+      </div>
+      {error && <p className="text-[10px] text-red-400">{error}</p>}
+    </div>
   );
 }

@@ -65,6 +65,10 @@ export const devicesApi = {
   update: (id, payload) =>
     request(`/devices/${id}`, { method: 'PUT', body: payload, prefix: 'Failed to update device' }),
 
+  /** Sets LAST_SEEN = SYSDATE for the device (call after a successful connect). */
+  patchLastSeen: (id) =>
+    request(`/devices/${id}/last-seen`, { method: 'PATCH', prefix: 'Failed to update last seen' }),
+
   remove: (id) =>
     request(`/devices/${id}`, { method: 'DELETE', prefix: 'Failed to delete device' }),
 };

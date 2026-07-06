@@ -71,12 +71,13 @@ export const usersApi = {
   unlock: (id) => request(`/users/${id}/unlock`, { method: 'POST', prefix: 'Unlock failed', timeoutMs: 30000 }),
 
   /**
-   * Grant a role, optionally scoped. `scope` is { projectId?, locationId?,
-   * deviceId? } — pass at most one. A bare number is treated as projectId for
-   * backward compatibility.
+   * Grant a role to a user. The role provides the default level/target; pass a
+   * `scope` ({ projectId? | locationId? | deviceId? }) to point THIS user's
+   * grant at a specific target instead (e.g. the same viewer role on a
+   * different project per user). Omit scope to use the role's own default.
    */
   grantRole: (id, roleKey, scope = null) => {
-    const s = typeof scope === 'object' && scope !== null ? scope : { projectId: scope };
+    const s = (typeof scope === 'object' && scope !== null) ? scope : {};
     return request(`/users/${id}/roles`, {
       method: 'POST',
       body: {
@@ -110,6 +111,63 @@ export const rolesApi = {
 
 export const permissionsApi = {
   list: () => request('/permissions', { prefix: 'Failed to fetch permissions', timeoutMs: 30000 }),
+  create: (permissionKey, description) =>
+    request('/permissions', { method: 'POST', body: { permissionKey, description }, prefix: 'Failed to create permission', timeoutMs: 30000 }),
+  /** patch = { description?, resource?, action? } */
+  update: (id, patch) =>
+    request(`/permissions/${id}`, { method: 'PUT', body: patch, prefix: 'Failed to update permission', timeoutMs: 30000 }),
+  remove: (id) =>
+    request(`/permissions/${id}`, { method: 'DELETE', prefix: 'Failed to delete permission', timeoutMs: 30000 }),
+
+  // Endpoint mappings — what routes a permission protects.
+  listEndpoints: (id) =>
+    request(`/permissions/${id}/endpoints`, { prefix: 'Failed to fetch endpoints', timeoutMs: 30000 }),
+  addEndpoint: (id, httpMethod, pathPattern) =>
+    request(`/permissions/${id}/endpoints`, { method: 'POST', body: { httpMethod, pathPattern }, prefix: 'Failed to add endpoint', timeoutMs: 30000 }),
+  removeEndpoint: (endpointId) =>
+    request(`/permission-endpoints/${endpointId}`, { method: 'DELETE', prefix: 'Failed to remove endpoint', timeoutMs: 30000 }),
+
+  // Element mappings — which granular UI elements (buttons/controls) a
+  // permission covers. See config/uiElements.js for the catalog.
+  listElements: (id) =>
+    request(`/permissions/${id}/elements`, { prefix: 'Failed to fetch elements', timeoutMs: 30000 }),
+  addElement: (id, elementId) =>
+    request(`/permissions/${id}/elements`, { method: 'POST', body: { elementId }, prefix: 'Failed to add element', timeoutMs: 30000 }),
+  removeElement: (id, elementId) =>
+    request(`/permissions/${id}/elements/${encodeURIComponent(elementId)}`, { method: 'DELETE', prefix: 'Failed to remove element', timeoutMs: 30000 }),
+};
+
+// UI element → permission mappings (which permissions cover each granular UI
+// element). Used to gate live controls (e.g. the alarm Mute button).
+export const uiElementsApi = {
+  list: () => request('/ui-elements', { prefix: 'Failed to fetch UI elements', timeoutMs: 30000 }),
+};
+
+// The master catalog of UI elements (grouped by field). Stored in the DB and
+// fetched by the Permissions editor. `upsert` persists a typed-in element.
+export const uiElementCatalogApi = {
+  list: () => request('/ui-element-catalog', { prefix: 'Failed to fetch UI element catalog', timeoutMs: 30000 }),
+  upsert: ({ id, field, label }) =>
+    request('/ui-element-catalog', {
+      method: 'POST', body: { id, field, label },
+      prefix: 'Failed to save UI element', timeoutMs: 30000,
+    }),
+};
+
+// UI feature → permission overrides (which permission reveals a UI feature).
+export const uiFeaturesApi = {
+  list: () => request('/ui-features', { prefix: 'Failed to fetch UI features', timeoutMs: 30000 }),
+  /** permissionKey: a key to require, or null = always visible */
+  set: (featureId, permissionKey) =>
+    request(`/ui-features/${encodeURIComponent(featureId)}`, {
+      method: 'PUT', body: { permissionKey: permissionKey ?? null },
+      prefix: 'Failed to save UI feature', timeoutMs: 30000,
+    }),
+  /** remove the override → fall back to the built-in default */
+  reset: (featureId) =>
+    request(`/ui-features/${encodeURIComponent(featureId)}`, {
+      method: 'DELETE', prefix: 'Failed to reset UI feature', timeoutMs: 30000,
+    }),
 };
 
 export const auditApi = {
@@ -117,4 +175,4 @@ export const auditApi = {
     request('/audit', { query: { user_id: userId, limit }, prefix: 'Failed to fetch audit log', timeoutMs: 30000 }),
 };
 
-export default { authApi, usersApi, rolesApi, permissionsApi, auditApi };
+export default { authApi, usersApi, rolesApi, permissionsApi, uiFeaturesApi, uiElementsApi, auditApi };

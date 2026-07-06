@@ -2,26 +2,30 @@ import { useState } from 'react';
 import modbusApi from '../api/modbus.js';
 import { useAuth } from '../context/useAuth.js';
 
-export default function ControlButtons({ className = '', isConnected = false }) {
-  const { hasAnyPermission } = useAuth();
-  const canStart = hasAnyPermission(['device.start', 'device.control']);
-  const canStop  = hasAnyPermission(['device.stop',  'device.control']);
+export default function ControlButtons({ className = '', isConnected = false, target = {} }) {
+  const { hasAnyPermission, canFeature, canUseElement } = useAuth();
+  // Element gate: if an admin points a permission at the 'device.start_stop'
+  // element on the Permissions page, the user must hold it. If no permission
+  // covers that element, canUseElement returns true (not gated) — unchanged.
+  const elementAllows = canUseElement('device.start_stop');
+  const canStart = elementAllows && hasAnyPermission(['device.start', 'device.control']);
+  const canStop  = elementAllows && hasAnyPermission(['device.stop',  'device.control']);
 
   const [loading, setLoading] = useState({ start: false, stop: false });
   const [lastAction, setLastAction] = useState(null);
   const [actionError, setActionError] = useState('');
 
-  // If the user can't do either action, don't render the control card at all.
-  if (!canStart && !canStop) return null;
+  // Hidden if the admin's UI-feature mapping hides it, or the user can do neither.
+  if (!canFeature('button.device.control') || (!canStart && !canStop)) return null;
 
   const handleControl = async (action) => {
     setLoading((p) => ({ ...p, [action]: true }));
     setActionError('');
     try {
       if (action === 'start') {
-        await modbusApi.start();
+        await modbusApi.start(target);
       } else {
-        await modbusApi.stop();
+        await modbusApi.stop(target);
       }
       setLastAction({ type: action, time: new Date().toLocaleTimeString() });
     } catch (err) {

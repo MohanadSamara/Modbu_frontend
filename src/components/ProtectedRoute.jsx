@@ -8,7 +8,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/useAuth.js';
 
-export default function ProtectedRoute({ children, requiredPermission = null }) {
+export default function ProtectedRoute({ children, requiredPermission = null, requiredAnyPermission = null }) {
   const { isAuthenticated, loading, hasPermission } = useAuth();
   const location = useLocation();
 
@@ -28,7 +28,16 @@ export default function ProtectedRoute({ children, requiredPermission = null }) 
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  if (requiredPermission && !hasPermission(requiredPermission)) {
+  // Access is denied when a single required permission is missing, or when an
+  // "any of" list is given and the user holds none of them.
+  const missingSingle = requiredPermission && !hasPermission(requiredPermission);
+  const missingAny =
+    requiredAnyPermission &&
+    requiredAnyPermission.length > 0 &&
+    !requiredAnyPermission.some((p) => hasPermission(p));
+
+  if (missingSingle || missingAny) {
+    const deniedLabel = requiredPermission || (requiredAnyPermission || []).join(' or ');
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0f1117] p-6">
         <div className="max-w-md w-full bg-[#13151c] border border-white/10 rounded-2xl p-8 text-center">
@@ -40,7 +49,7 @@ export default function ProtectedRoute({ children, requiredPermission = null }) 
           </div>
           <h2 className="text-white text-lg font-semibold mb-2">Access denied</h2>
           <p className="text-gray-400 text-sm">
-            Your account doesn't have the <code className="text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">{requiredPermission}</code> permission.
+            Your account doesn't have the <code className="text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">{deniedLabel}</code> permission.
           </p>
         </div>
       </div>

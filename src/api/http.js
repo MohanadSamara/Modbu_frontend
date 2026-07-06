@@ -80,6 +80,14 @@ async function _refreshAccessToken() {
   return _refreshInflight;
 }
 
+// Public wrapper so callers (e.g. AuthProvider on first mount) can proactively
+// mint an access token from the stored refresh token *before* making an
+// authenticated request — avoiding an expected 401 on the very first call.
+// Returns the new access token, or null if there's no/invalid refresh token.
+export async function refreshAccessToken() {
+  return _refreshAccessToken();
+}
+
 // ── Error helpers ─────────────────────────────────────────────────────────
 async function parseErrorBody(res) {
   try {
@@ -204,4 +212,4 @@ export async function request(path, opts = {}) {
   }
 }
 
-export default { request, setAccessToken, getAccessToken, setRefreshToken, getRefreshToken, clearTokens, setAuthFailedHandler };
+export default { request, setAccessToken, getAccessToken, setRefreshToken, getRefreshToken, clearTokens, setAuthFailedHandler, refreshAccessToken };

@@ -72,11 +72,53 @@ body {
 .animate-scale-in  { animation: scale-in 0.2s  ease-out both; }
 .animate-slide-up  { animation: slide-up 0.4s  ease-out both; }
 
+/* ── Text reveal ──────────────────────────────────────────────────────
+   A subtle rise + de-blur used for text. Applied globally to page
+   headings below (replays on route change) and available as an opt-in
+   utility (.animate-text) for any other text. Uses only transform/opacity/
+   filter so it never shifts layout (no CLS). */
+@keyframes text-reveal {
+  from { opacity: 0; transform: translateY(0.4em); filter: blur(6px); }
+  to   { opacity: 1; transform: translateY(0);     filter: blur(0);   }
+}
+.animate-text { animation: text-reveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Continuous sheen for gradient headings (kept slow + subtle). */
+@keyframes gradient-pan {
+  0%   { background-position:   0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
 /* stagger helpers */
 .delay-100 { animation-delay: 100ms; }
 .delay-200 { animation-delay: 200ms; }
 .delay-300 { animation-delay: 300ms; }
 .delay-400 { animation-delay: 400ms; }
+
+/* ── Project-wide text animation ──────────────────────────────────────
+   Every page heading gently reveals on mount; because route changes
+   remount the page component, this replays on each navigation. Scoped to
+   headings so motion stays purposeful (1–2 animated elements per view).
+   The second heading is nudged later for a light stagger. */
+main :is(h1, h2) { animation: text-reveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+main :is(h1, h2) ~ :is(h1, h2) { animation-delay: 70ms; }
+
+/* Animate the gradient fill of any .gradient-text so brand/hero text shimmers. */
+.gradient-text {
+  background-size: 200% auto;
+  animation: gradient-pan 6s linear infinite alternate;
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────
+   Respect users who ask for less motion: near-instant, non-looping. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ── Component layer ── */
 @layer components {

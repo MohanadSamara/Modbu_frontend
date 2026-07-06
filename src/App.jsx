@@ -2,6 +2,11 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import DeviceConnections from './pages/DeviceConnections.jsx';
+import Brands from './pages/Brands.jsx';
+import Alarms from './pages/Alarms.jsx';
+import FuelLevels from './pages/FuelLevels.jsx';
+import DeviceMapPage from './pages/DeviceMapPage.jsx';
 import Events from './pages/Events.jsx';
 import Projects from './pages/Projects.jsx';
 import Settings from './pages/Settings.jsx';
@@ -9,6 +14,7 @@ import Users from './pages/Users.jsx';
 import AuditLog from './pages/AuditLog.jsx';
 import Login from './pages/Login.jsx';
 import Roles from './pages/Roles.jsx';
+import Permissions from './pages/Permissions.jsx';
 import { SettingsProvider } from './context/SettingsContext.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
 
@@ -37,6 +43,46 @@ function App() {
             >
               <Route index element={<Dashboard />} />
               <Route
+                path="connections"
+                element={
+                  <ProtectedRoute requiredPermission="device.read">
+                    <DeviceConnections />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="brands"
+                element={
+                  <ProtectedRoute requiredPermission="device.read">
+                    <Brands />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="alarms"
+                element={
+                  <ProtectedRoute requiredPermission="alarm.read">
+                    <Alarms />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="fuel"
+                element={
+                  <ProtectedRoute requiredPermission="device.read">
+                    <FuelLevels />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="map"
+                element={
+                  <ProtectedRoute requiredPermission="device.read">
+                    <DeviceMapPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="events"
                 element={
                   <ProtectedRoute requiredPermission="alarm.read">
@@ -47,7 +93,7 @@ function App() {
               <Route
                 path="projects"
                 element={
-                  <ProtectedRoute requiredPermission="project.read">
+                  <ProtectedRoute requiredAnyPermission={['project.read', 'device.read']}>
                     <Projects />
                   </ProtectedRoute>
                 }
@@ -81,6 +127,14 @@ function App() {
                 element={
                   <ProtectedRoute requiredPermission="user.assign_role">
                     <Roles />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="permissions"
+                element={
+                  <ProtectedRoute requiredPermission="user.assign_role">
+                    <Permissions />
                   </ProtectedRoute>
                 }
               />

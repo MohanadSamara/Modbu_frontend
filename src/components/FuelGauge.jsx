@@ -3,6 +3,7 @@ import { useSettings } from '../context/SettingsContext.jsx';
 import { defaultSettings } from '../api/settings.js';
 import { modbusApi } from '../api/modbus.js';
 import { useAlarmSound } from '../hooks/useAlarmSound.js';
+import { useAuth } from '../context/useAuth.js';
 
 // ── Colour based on % level vs configured thresholds ──────────────────────
 function fuelColor(level, lowThreshold, criticalThreshold) {
@@ -76,7 +77,28 @@ const RATE_WINDOW_MS  = 2 * 60 * 1000;   // 2 minutes
 // numbers from two samples 3 s apart).
 const RATE_MIN_SPAN_MS = 30 * 1000;      // 30 seconds
 
-export default function FuelGauge({ className = '', isConnected = false }) {
+// ── Reading-smoothing config ───────────────────────────────────────────────
+// Two-stage filter to stop the gauge fluctuating:
+//   1. median of the last few RAW reads → rejects one-off spikes (e.g. a lone
+//      glitch/0 among steady values)
+//   2. exponential moving average of that median → smooths small sensor jitter
+// Higher alpha = snappier but noisier; lower = smoother but slower to react.
+const FUEL_MEDIAN_WINDOW = 5;   // raw samples kept for the median
+const FUEL_SMOOTHING_ALPHA = 0.4;
+
+// ── Alarm priority ("power level") ──────────────────────────────────────────
+// Highest first. Only the top active alarm sounds — a more severe alarm closes
+// the lesser ones (e.g. Critical fuel suppresses the Consumption alarm).
+const ALARM_PRIORITY = ['critical', 'warning', 'rate'];
+
+function median(arr) {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+export default function FuelGauge({ className = '', isConnected = false, target = {} }) {
   const [fuel, setFuel]       = useState(0);   // always raw %
   const [fetching, setFetching] = useState(false);
   const [error, setError]     = useState('');
@@ -84,6 +106,10 @@ export default function FuelGauge({ className = '', isConnected = false }) {
 
   // Rolling buffer of {t, fuel} samples used to compute consumption rate
   const samplesRef = useRef([]);
+  // Smoothing filter state: last few raw reads (for the median) + the current
+  // exponentially-smoothed value that actually drives the gauge.
+  const rawBufRef = useRef([]);
+  const smoothRef = useRef(null);
 
   // ── Settings ──────────────────────────────────────────────────────────
   const { settings } = useSettings();
@@ -101,6 +127,16 @@ export default function FuelGauge({ className = '', isConnected = false }) {
   // ── Alarm sound hook ───────────────────────────────────────────────────
   const { setActive, stop: stopAlarm, muted, setMuted } = useAlarmSound();
 
+  // Whether this user may USE the Mute button — gated by the 'alarm.mute'
+  // element on the Permissions page (needs a write-level permission covering
+  // it). If no permission covers it, canUseElement returns true (not gated).
+  const { canUseElement } = useAuth();
+  const canMute = canUseElement('alarm.mute');
+
+  // Stable primitive identifying the polled device, so the effect restarts when
+  // the user switches devices (not on every render of the target object).
+  const targetId = target.deviceId ?? target.id ?? target.ip ?? null;
+
   // ── Poll fuel API ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!isConnected) {
@@ -108,25 +144,45 @@ export default function FuelGauge({ className = '', isConnected = false }) {
       setError('');
       setConsumptionRate(null);
       samplesRef.current = [];
+      rawBufRef.current = [];
+      smoothRef.current = null;   // reseed the filter on next connect
       stopAlarm();
       return;
     }
 
     const update = async () => {
       setFetching(true);
-      setError('');
       try {
         // Use modbusApi.getFuel() so the request goes through http.js —
         // it injects the Authorization header and transparently refreshes
         // the access token on 401. Without this we get a flood of 401s.
-        const json = await modbusApi.getFuel();
-        const value = typeof json?.fuel === 'number' ? json.fuel : 0;
-        setFuel(value);
+        const json = await modbusApi.getFuel(target);
+        const raw = typeof json?.fuel === 'number' ? json.fuel : null;
+        if (raw === null) {
+          // Absent/invalid reading — keep the last good value instead of
+          // dropping the gauge to 0 (that snap was the worst "fluctuation").
+          return;
+        }
+        setError('');
+
+        // Stage 1: median of recent raw reads → drop lone spikes/glitches.
+        const rb = rawBufRef.current;
+        rb.push(raw);
+        while (rb.length > FUEL_MEDIAN_WINDOW) rb.shift();
+        const med = median(rb);
+
+        // Stage 2: exponential moving average → smooth remaining jitter.
+        const prev = smoothRef.current;
+        const smoothed = prev == null ? med : prev + FUEL_SMOOTHING_ALPHA * (med - prev);
+        smoothRef.current = smoothed;
+
+        // Deadband: ignore sub-0.05% wobble so the needle sits still.
+        setFuel((f) => (Math.abs(f - smoothed) < 0.05 ? f : smoothed));
 
         // ── Update rolling sample buffer & compute consumption rate ────
         const now = Date.now();
         const buf = samplesRef.current;
-        buf.push({ t: now, fuel: value });
+        buf.push({ t: now, fuel: smoothed });
         // Drop samples older than the window
         const cutoff = now - RATE_WINDOW_MS;
         while (buf.length && buf[0].t < cutoff) buf.shift();
@@ -143,8 +199,9 @@ export default function FuelGauge({ className = '', isConnected = false }) {
           }
         }
       } catch (err) {
+        // Transient read/network error — keep showing the last value rather
+        // than flashing to 0. Only a real disconnect resets the gauge.
         setError(err.message || 'Network error');
-        setFuel(0);
       } finally {
         setFetching(false);
       }
@@ -153,7 +210,8 @@ export default function FuelGauge({ className = '', isConnected = false }) {
     update();
     const id = setInterval(update, 3000);
     return () => { clearInterval(id); stopAlarm(); };
-  }, [isConnected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, targetId]);
 
   // ── Rate-based alarm condition (only meaningful when we have a rate) ───
   const rateAlarmActive =
@@ -164,21 +222,22 @@ export default function FuelGauge({ className = '', isConnected = false }) {
     consumptionRate >= rateThreshold;
 
   // ── Alarm logic ────────────────────────────────────────────────────────
-  // Multiple alarm types can play concurrently so the operator hears every
-  // condition that's active. e.g. fuel below the low-tank threshold AND
-  // draining fast → both 'warning' and 'rate' loops run side-by-side.
+  // Power level: figure out which conditions are active, then keep only the
+  // single highest-priority one (ALARM_PRIORITY). A more severe alarm closes
+  // the lesser — e.g. once fuel hits Critical, the Consumption alarm stops.
   useEffect(() => {
     if (!alertsEnabled || !isConnected || fuel <= 0) {
       stopAlarm();
       return;
     }
 
-    const active = [];
-    if (fuel <= criticalThreshold)      active.push('critical');
-    else if (fuel <= lowThreshold)      active.push('warning');
-    if (rateAlarmActive)                active.push('rate');
+    const conditions = [];
+    if (fuel <= criticalThreshold)      conditions.push('critical');
+    else if (fuel <= lowThreshold)      conditions.push('warning');
+    if (rateAlarmActive)                conditions.push('rate');
 
-    setActive(active);
+    const top = ALARM_PRIORITY.find((p) => conditions.includes(p));
+    setActive(top ? [top] : []);
   }, [fuel, alertsEnabled, isConnected, lowThreshold, criticalThreshold, rateAlarmActive, setActive, stopAlarm]);
 
   // ── Derived display values ─────────────────────────────────────────────
@@ -232,8 +291,9 @@ export default function FuelGauge({ className = '', isConnected = false }) {
             </span>
           )}
 
-          {/* Mute button — only shown when alarm is active */}
-          {alarmActive && (
+          {/* Mute button — only when the alarm is active AND the user is
+              allowed to use it (see the 'alarm.mute' element on Permissions). */}
+          {alarmActive && canMute && (
             <MuteButton muted={muted} onToggle={() => setMuted((m) => !m)} />
           )}
 

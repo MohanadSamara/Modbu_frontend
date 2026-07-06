@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/useAuth.js';
 
+// Each nav item is gated by a UI-feature id (see config/uiFeatures.js), so an
+// admin can change which permission reveals it from the UI Access page.
 const NAV_ITEMS = [
   {
     to: '/',
@@ -16,7 +18,9 @@ const NAV_ITEMS = [
   {
     to: '/projects',
     label: 'Projects',
-    permission: 'project.read',
+    // A device-only viewer sees a flat device list, so the link is "Devices".
+    feature: 'nav.projects',
+    labelFor: (has) => (has('project.read') ? 'Projects' : 'Devices'),
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -25,9 +29,20 @@ const NAV_ITEMS = [
     ),
   },
   {
+    to: '/brands',
+    label: 'Brands',
+    feature: 'nav.brands',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+          d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-7 7a2 2 0 01-2.82 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" />
+      </svg>
+    ),
+  },
+  {
     to: '/events',
     label: 'Events',
-    permission: 'alarm.read',
+    feature: 'nav.events',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -38,7 +53,7 @@ const NAV_ITEMS = [
   {
     to: '/settings',
     label: 'Settings',
-    permission: 'settings.read',
+    feature: 'nav.settings',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -52,7 +67,7 @@ const NAV_ITEMS = [
     to: '/users',
     label: 'Users',
     section: 'Administration',
-    permission: 'user.read',
+    feature: 'nav.users',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -64,7 +79,7 @@ const NAV_ITEMS = [
     to: '/audit',
     label: 'Audit log',
     section: 'Administration',
-    permission: 'audit.read',
+    feature: 'nav.audit',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -76,11 +91,23 @@ const NAV_ITEMS = [
     to: '/roles',
     label: 'Roles',
     section: 'Administration',
-    permission: 'user.assign_role',
+    feature: 'nav.roles',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
           d="M12 9v3m0 3h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/permissions',
+    label: 'Permissions',
+    section: 'Administration',
+    feature: 'nav.permissions',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+          d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
       </svg>
     ),
   },
@@ -89,7 +116,7 @@ const NAV_ITEMS = [
 export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, canFeature } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
@@ -139,7 +166,7 @@ export default function Layout() {
         className={`fixed inset-y-0 left-0 z-40 flex flex-col w-64 bg-[#13151c] border-r border-white/5
           transform transition-transform duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-          lg:relative lg:translate-x-0 lg:flex`}
+          lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 lg:flex`}
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-6 h-16 border-b border-white/5 flex-shrink-0">
@@ -159,9 +186,8 @@ export default function Layout() {
         <nav className="flex-1 px-3 py-6 overflow-y-auto">
           {(() => {
             // Drop entries the current user can't access, then group by section.
-            const visible = NAV_ITEMS.filter(
-              (i) => !i.permission || hasPermission(i.permission)
-            );
+            const canSee = (i) => !i.feature || canFeature(i.feature);
+            const visible = NAV_ITEMS.filter(canSee);
             const groups = [];
             let current = null;
             visible.forEach((item) => {
@@ -179,9 +205,10 @@ export default function Layout() {
                   {g.name}
                 </p>
                 <div className="space-y-1">
-                  {g.items.map(({ to, label, icon }) => {
+                  {g.items.map(({ to, label, labelFor, icon }) => {
                     const active =
                       to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
+                    const shownLabel = labelFor ? labelFor(hasPermission) : label;
                     return (
                       <Link
                         key={to}
@@ -194,7 +221,7 @@ export default function Layout() {
                           }`}
                       >
                         <span className={active ? 'text-blue-400' : 'text-gray-500'}>{icon}</span>
-                        {label}
+                        {shownLabel}
                         {active && (
                           <span className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" />
                         )}
@@ -241,11 +268,15 @@ export default function Layout() {
           {/* Page title from nav */}
           <div className="hidden lg:block">
             <span className="text-sm font-medium text-gray-400">
-              {NAV_ITEMS
-                .filter((i) => !i.permission || hasPermission(i.permission))
-                .find(({ to }) =>
-                  to === '/' ? location.pathname === '/' : location.pathname.startsWith(to)
-                )?.label ?? ''}
+              {(() => {
+                const item = NAV_ITEMS
+                  .filter((i) => !i.feature || canFeature(i.feature))
+                  .find(({ to }) =>
+                    to === '/' ? location.pathname === '/' : location.pathname.startsWith(to)
+                  );
+                if (!item) return '';
+                return item.labelFor ? item.labelFor(hasPermission) : item.label;
+              })()}
             </span>
           </div>
 

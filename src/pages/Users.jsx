@@ -338,25 +338,52 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileErr, setProfileErr] = useState(null);
 
-  // Role grant form
-  const [grantRoleKey,   setGrantRoleKey]   = useState(roles[0]?.key || '');
-  const [grantingRole,   setGrantingRole]   = useState(false);
+  // Role grant form. The role provides the DEFAULT level + target, but the same
+  // role can be granted to different users on different targets — so the admin
+  // can adjust the target for this specific user before granting.
+  const [grantRoleKey, setGrantRoleKey] = useState(roles[0]?.key || '');
+  const [grantingRole, setGrantingRole] = useState(false);
 
-  // Scope selection: global | project | location | device
+  const selectedRole = roles.find((r) => r.key === grantRoleKey);
+
+  // Scope for THIS grant, seeded from the role's own level/target.
   const [scopeType,       setScopeType]       = useState('global');
   const [scopeProjectId,  setScopeProjectId]  = useState('');
   const [scopeLocationId, setScopeLocationId] = useState('');
   const [scopeDeviceId,   setScopeDeviceId]   = useState('');
-  const [locations, setLocations] = useState([]); // flattened for chosen project
-  const [devices,   setDevices]   = useState([]); // for chosen location
+  const [locations, setLocations] = useState([]);
+  const [devices,   setDevices]   = useState([]);
 
-  // Load (and flatten) locations whenever a project is chosen for a
-  // location/device-scoped grant.
+  // One distinct ROLE per user, but that role may be assigned to several
+  // targets — up to the role's scope_count (e.g. a 2-device role → 2 devices).
+  const assignments = user.roles || [];
+  const hasRole = assignments.length > 0;
+  const currentRoleKey = assignments[0]?.key || null;
+  const currentRole = roles.find((r) => r.key === currentRoleKey) || null;
+  const maxTargets = currentRole?.scopeLevel && currentRole.scopeLevel !== 'global'
+    ? (currentRole.scopeCount || 1)
+    : 1;
+  const canAddMore = hasRole
+    && (currentRole?.scopeLevel && currentRole.scopeLevel !== 'global')
+    && assignments.length < maxTargets;
+
+  const [editingUserRoleId, setEditingUserRoleId] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [addingTarget, setAddingTarget] = useState(false);
+
+  // When the chosen role changes, reset the scope to that role's defaults.
   useEffect(() => {
-    if ((scopeType !== 'location' && scopeType !== 'device') || !scopeProjectId) {
-      setLocations([]);
-      return;
-    }
+    if (!selectedRole) return;
+    setScopeType(selectedRole.scopeLevel || 'global');
+    setScopeProjectId(selectedRole.scopeProjectId ? String(selectedRole.scopeProjectId) : '');
+    setScopeLocationId(selectedRole.scopeLocationId ? String(selectedRole.scopeLocationId) : '');
+    setScopeDeviceId(selectedRole.scopeDeviceId ? String(selectedRole.scopeDeviceId) : '');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grantRoleKey]);
+
+  // Load locations when a project is chosen (for location/device levels).
+  useEffect(() => {
+    if ((scopeType !== 'location' && scopeType !== 'device') || !scopeProjectId) { setLocations([]); return; }
     let alive = true;
     locationsApi.listByProject(scopeProjectId)
       .then((tree) => { if (alive) setLocations(flattenLocations(tree)); })
@@ -364,25 +391,15 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
     return () => { alive = false; };
   }, [scopeType, scopeProjectId]);
 
-  // Load devices whenever a location is chosen for a device-scoped grant.
+  // Load devices when a location is chosen (for device level).
   useEffect(() => {
-    if (scopeType !== 'device' || !scopeLocationId) {
-      setDevices([]);
-      return;
-    }
+    if (scopeType !== 'device' || !scopeLocationId) { setDevices([]); return; }
     let alive = true;
     devicesApi.listByLocation(scopeLocationId)
       .then((rows) => { if (alive) setDevices(rows || []); })
       .catch(() => { if (alive) setDevices([]); });
     return () => { alive = false; };
   }, [scopeType, scopeLocationId]);
-
-  function resetScope(nextType) {
-    setScopeType(nextType);
-    setScopeProjectId('');
-    setScopeLocationId('');
-    setScopeDeviceId('');
-  }
 
   async function saveProfile() {
     setProfileErr(null);
@@ -394,34 +411,158 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
     finally { setSavingProfile(false); }
   }
 
-  async function grantRole() {
-    if (!grantRoleKey) return;
-    // Build the one scope id the backend expects (at most one non-null).
-    let scope = null;
-    if (scopeType === 'project'  && scopeProjectId)  scope = { projectId:  Number(scopeProjectId) };
-    else if (scopeType === 'location' && scopeLocationId) scope = { locationId: Number(scopeLocationId) };
-    else if (scopeType === 'device'   && scopeDeviceId)   scope = { deviceId:   Number(scopeDeviceId) };
+  // Build the { projectId | locationId | deviceId } scope from the current
+  // selectors, validating that a target is picked for non-global levels.
+  function buildScope() {
+    if (scopeType === 'project') {
+      if (!scopeProjectId)  { alert('Pick a project for this user.');  return undefined; }
+      return { projectId: Number(scopeProjectId) };
+    }
+    if (scopeType === 'location') {
+      if (!scopeLocationId) { alert('Pick a location for this user.'); return undefined; }
+      return { locationId: Number(scopeLocationId) };
+    }
+    if (scopeType === 'device') {
+      if (!scopeDeviceId)   { alert('Pick a device for this user.');   return undefined; }
+      return { deviceId: Number(scopeDeviceId) };
+    }
+    return null; // global
+  }
 
-    if (scopeType === 'project'  && !scopeProjectId)  { alert('Pick a project for the scope.');  return; }
-    if (scopeType === 'location' && !scopeLocationId) { alert('Pick a location for the scope.'); return; }
-    if (scopeType === 'device'   && !scopeDeviceId)   { alert('Pick a device for the scope.');   return; }
+  // Effective level of an existing assignment, inferred from its target.
+  function levelOfAssignment(r) {
+    if (r.deviceId)   return 'device';
+    if (r.locationId) return 'location';
+    if (r.projectId)  return 'project';
+    return 'global';
+  }
 
+  function startEditAssignment(r) {
+    setAddingTarget(false);
+    setEditingUserRoleId(r.userRoleId);
+    setScopeType(levelOfAssignment(r));
+    setScopeProjectId(r.projectId ? String(r.projectId) : '');
+    setScopeLocationId(r.locationId ? String(r.locationId) : '');
+    setScopeDeviceId(r.deviceId ? String(r.deviceId) : '');
+  }
+
+  function cancelEdit() {
+    setEditingUserRoleId(null);
+  }
+
+  // Re-point an existing assignment to a new target. There's no PUT endpoint for
+  // assignments, so this revokes the old grant and re-creates it with the new
+  // scope — the admin never has to do it manually.
+  async function saveAssignmentEdit(roleKey) {
+    const scope = buildScope();
+    if (scope === undefined) return; // validation failed
+    setSavingEdit(true);
+    try {
+      await usersApi.revokeRole(user.id, editingUserRoleId);
+      await usersApi.grantRole(user.id, roleKey, scope);
+      setEditingUserRoleId(null);
+      await onChange();
+    } catch (e) {
+      alert(`Could not update the assignment: ${e.detail || e.message}. The role may have been removed — please re-assign it.`);
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function grantRole(roleKey) {
+    if (!roleKey) return;
+    // One distinct role per user — a different role is blocked until the
+    // current one is removed. The SAME role may be added again for another
+    // target, up to the role's scope_count.
+    if (hasRole && roleKey !== currentRoleKey) {
+      alert('This user already has a role. Remove it before assigning a different one.');
+      return;
+    }
+    if (hasRole && roleKey === currentRoleKey && assignments.length >= maxTargets) {
+      alert(`This role covers ${maxTargets} ${currentRole.scopeLevel}${maxTargets !== 1 ? 's' : ''}. Remove one before adding another.`);
+      return;
+    }
+    const scope = buildScope();
+    if (scope === undefined) return; // validation failed
     setGrantingRole(true);
     try {
-      await usersApi.grantRole(user.id, grantRoleKey, scope);
-      resetScope('global');
+      await usersApi.grantRole(user.id, roleKey, scope);
+      setAddingTarget(false);
       await onChange();
     } catch (e) { alert(e.detail || e.message); }
     finally { setGrantingRole(false); }
   }
 
+  // Begin adding another target for the already-assigned role.
+  function startAddTarget() {
+    setEditingUserRoleId(null);
+    setAddingTarget(true);
+    setScopeType(currentRole?.scopeLevel || 'global');
+    setScopeProjectId('');
+    setScopeLocationId('');
+    setScopeDeviceId('');
+  }
+
   async function revokeRole(userRoleId) {
-    if (!confirm('Revoke this role assignment?')) return;
+    if (!confirm('Remove this role from the user?')) return;
     try {
       await usersApi.revokeRole(user.id, userRoleId);
+      setEditingUserRoleId((cur) => (cur === userRoleId ? null : cur));
       await onChange();
     } catch (e) { alert(e.detail || e.message); }
   }
+
+  // Target selectors (project → location → device), shared by the assign form
+  // and the in-place edit editor. Each shows a count of what's available.
+  const targetFields = (
+    <>
+      {scopeType !== 'global' && (
+        <Field label="Project">
+          <select value={scopeProjectId}
+            onChange={(e) => { setScopeProjectId(e.target.value); setScopeLocationId(''); setScopeDeviceId(''); }}
+            className={inputCls}>
+            <option value="">— select project —</option>
+            {projects.map((p) => (
+              <option key={p.ID || p.id} value={p.ID || p.id}>{p.NAME || p.name}</option>
+            ))}
+          </select>
+          <p className="text-[11px] text-gray-500 mt-1">
+            {projects.length} project{projects.length !== 1 ? 's' : ''} available
+          </p>
+        </Field>
+      )}
+
+      {(scopeType === 'location' || scopeType === 'device') && scopeProjectId && (
+        <Field label="Location">
+          <select value={scopeLocationId}
+            onChange={(e) => { setScopeLocationId(e.target.value); setScopeDeviceId(''); }}
+            className={inputCls}>
+            <option value="">— select location —</option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>{' '.repeat((l.depth - 1) * 2)}{l.name}</option>
+            ))}
+          </select>
+          <p className="text-[11px] text-gray-500 mt-1">
+            {locations.length} location{locations.length !== 1 ? 's' : ''} in this project
+          </p>
+        </Field>
+      )}
+
+      {scopeType === 'device' && scopeLocationId && (
+        <Field label="Device">
+          <select value={scopeDeviceId} onChange={(e) => setScopeDeviceId(e.target.value)} className={inputCls}>
+            <option value="">— select device —</option>
+            {devices.map((d) => (
+              <option key={d.id || d.ID} value={d.id || d.ID}>{d.name || d.NAME}</option>
+            ))}
+          </select>
+          <p className="text-[11px] text-gray-500 mt-1">
+            {devices.length} device{devices.length !== 1 ? 's' : ''} in this location
+          </p>
+        </Field>
+      )}
+    </>
+  );
 
   return (
     <Modal title={`Edit ${user.username}`} onClose={onClose} wide>
@@ -458,97 +599,128 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
         <section>
           <h3 className="text-white text-sm font-semibold mb-3">Role assignments</h3>
 
-          {/* Existing role chips */}
-          <div className="space-y-1.5 mb-4">
-            {(user.roles || []).length === 0 && (
-              <div className="text-gray-500 text-xs">No roles assigned. User will be denied access.</div>
-            )}
-            {(user.roles || []).map((r) => (
-              <div key={r.userRoleId}
-                className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-blue-400 text-xs font-semibold">{r.name || r.key}</span>
-                  <span className="text-gray-500 text-[10px] uppercase tracking-wider">
-                    {r.deviceId ? `Device #${r.deviceId}`
-                      : r.locationId ? `Location #${r.locationId}`
-                      : r.projectId ? `Project #${r.projectId}`
-                      : 'Global'}
-                  </span>
-                </div>
-                <button onClick={() => revokeRole(r.userRoleId)}
-                  className="text-gray-500 hover:text-red-400 text-xs">Revoke</button>
+          {/* No role → show a hint; the assign form is in the else branch below. */}
+          {!hasRole && (
+            <div className="text-gray-500 text-xs mb-4">No role assigned. User will be denied access.</div>
+          )}
+
+          {/* One role per user — its targets are listed under a single card. */}
+          {hasRole ? (
+            <div className="rounded-lg bg-white/5 border border-white/5 mb-4">
+              {/* Role header */}
+              <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5">
+                <span className="text-blue-400 text-sm font-semibold">{currentRole?.name || currentRoleKey}</span>
+                <span className="text-gray-500 text-[10px] uppercase tracking-wider">
+                  {!currentRole || currentRole.scopeLevel === 'global' ? 'Global' : `${currentRole.scopeLevel}-level`}
+                </span>
               </div>
-            ))}
-          </div>
 
-          {/* Grant new */}
-          <div className="border-t border-white/5 pt-3">
-            <div className="text-xs text-gray-500 mb-2">Grant new role</div>
-            <div className="space-y-2">
-              <Field label="Role">
-                <select value={grantRoleKey} onChange={(e) => setGrantRoleKey(e.target.value)} className={inputCls}>
-                  {roles.map((r) => (
-                    <option key={r.key} value={r.key}>{r.name} ({r.key})</option>
-                  ))}
-                </select>
-              </Field>
+              {/* Its targets */}
+              <div className="divide-y divide-white/5">
+                {assignments.map((a) => {
+                  const editing = editingUserRoleId === a.userRoleId;
+                  return (
+                    <div key={a.userRoleId}>
+                      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+                        <span className="text-xs text-gray-300">
+                          {a.deviceId ? `Device #${a.deviceId}`
+                            : a.locationId ? `Location #${a.locationId}`
+                            : a.projectId ? `Project #${a.projectId}`
+                            : 'Everywhere (global)'}
+                        </span>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          {levelOfAssignment(a) !== 'global' && (
+                            <button onClick={() => (editing ? cancelEdit() : startEditAssignment(a))}
+                              className="text-blue-400 hover:text-blue-300 text-xs">
+                              {editing ? 'Cancel' : 'Edit'}
+                            </button>
+                          )}
+                          <button onClick={() => revokeRole(a.userRoleId)}
+                            className="text-gray-500 hover:text-red-400 text-xs">Remove</button>
+                        </div>
+                      </div>
 
-              {/* Scope level */}
-              <Field label="Scope level">
-                <select value={scopeType} onChange={(e) => resetScope(e.target.value)} className={inputCls}>
-                  <option value="global">Global (everywhere)</option>
-                  <option value="project">A single project</option>
-                  <option value="location">A single location</option>
-                  <option value="device">A single device</option>
-                </select>
-              </Field>
+                      {editing && (
+                        <div className="px-3 pb-3 pt-1 space-y-2 border-t border-white/5 bg-black/20">
+                          <div className="text-[11px] text-gray-500">
+                            Change the {scopeType} this assignment points to.
+                          </div>
+                          {targetFields}
+                          <button onClick={() => saveAssignmentEdit(a.key)} disabled={savingEdit}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-700/40 text-white text-xs font-semibold rounded-lg">
+                            {savingEdit ? 'Saving…' : 'Save changes'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
 
-              {/* Project picker — for project/location/device scope */}
-              {scopeType !== 'global' && (
-                <Field label="Project">
-                  <select value={scopeProjectId}
-                    onChange={(e) => { setScopeProjectId(e.target.value); setScopeLocationId(''); setScopeDeviceId(''); }}
-                    className={inputCls}>
-                    <option value="">— select project —</option>
-                    {projects.map((p) => (
-                      <option key={p.ID || p.id} value={p.ID || p.id}>{p.NAME || p.name}</option>
-                    ))}
-                  </select>
-                </Field>
-              )}
+              {/* Footer: count + add another target */}
+              <div className="px-3 py-2 border-t border-white/5 space-y-2">
+                <div className="text-[11px] text-gray-500">
+                  {maxTargets > 1
+                    ? `Covers up to ${maxTargets} ${currentRole.scopeLevel}s — ${assignments.length} of ${maxTargets} assigned.`
+                    : 'One role per user. Remove it to assign a different one.'}
+                </div>
 
-              {/* Location picker — for location/device scope */}
-              {(scopeType === 'location' || scopeType === 'device') && scopeProjectId && (
-                <Field label="Location">
-                  <select value={scopeLocationId}
-                    onChange={(e) => { setScopeLocationId(e.target.value); setScopeDeviceId(''); }}
-                    className={inputCls}>
-                    <option value="">— select location —</option>
-                    {locations.map((l) => (
-                      <option key={l.id} value={l.id}>{' '.repeat((l.depth - 1) * 2)}{l.name}</option>
-                    ))}
-                  </select>
-                </Field>
-              )}
+                {canAddMore && !addingTarget && (
+                  <button onClick={startAddTarget}
+                    className="text-xs text-blue-400 hover:text-blue-300">
+                    + Add another {currentRole.scopeLevel}
+                  </button>
+                )}
 
-              {/* Device picker — for device scope */}
-              {scopeType === 'device' && scopeLocationId && (
-                <Field label="Device">
-                  <select value={scopeDeviceId} onChange={(e) => setScopeDeviceId(e.target.value)} className={inputCls}>
-                    <option value="">— select device —</option>
-                    {devices.map((d) => (
-                      <option key={d.id || d.ID} value={d.id || d.ID}>{d.name || d.NAME}</option>
-                    ))}
-                  </select>
-                </Field>
-              )}
-
-              <button onClick={grantRole} disabled={grantingRole}
-                className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-700/40 text-white text-sm font-semibold rounded-lg">
-                {grantingRole ? 'Granting…' : 'Grant role'}
-              </button>
+                {canAddMore && addingTarget && (
+                  <div className="rounded-lg bg-black/20 border border-white/5 p-3 space-y-2">
+                    <div className="text-[11px] text-gray-500">
+                      Add another {scopeType} for this role.
+                    </div>
+                    {targetFields}
+                    <div className="flex gap-2">
+                      <button onClick={() => grantRole(currentRoleKey)} disabled={grantingRole}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-700/40 text-white text-xs font-semibold rounded-lg">
+                        {grantingRole ? 'Adding…' : 'Add'}
+                      </button>
+                      <button onClick={() => setAddingTarget(false)}
+                        className="px-3 py-1.5 text-xs text-gray-300 hover:text-white">Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="border-t border-white/5 pt-3">
+              <div className="text-xs text-gray-500 mb-2">Assign role</div>
+              <div className="space-y-2">
+                <Field label="Role">
+                  <select value={grantRoleKey} onChange={(e) => setGrantRoleKey(e.target.value)} className={inputCls}>
+                    {roles.map((r) => (
+                      <option key={r.key} value={r.key}>{r.name} ({r.key})</option>
+                    ))}
+                  </select>
+                </Field>
+
+                {/* Level comes from the role; the target is set per user. */}
+                <div className="text-xs text-gray-400 px-1 py-1">
+                  Level: <span className="text-gray-200">
+                    {scopeType === 'global' ? 'Global (everywhere)' : `A single ${scopeType}`}
+                  </span>
+                  {selectedRole?.scopeLevel && selectedRole.scopeLevel !== 'global' && (selectedRole.scopeCount || 1) > 1 && (
+                    <span className="text-gray-500"> — up to {selectedRole.scopeCount} {selectedRole.scopeLevel}s, added one at a time.</span>
+                  )}
+                </div>
+
+                {targetFields}
+
+                <button onClick={() => grantRole(grantRoleKey)} disabled={grantingRole}
+                  className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-700/40 text-white text-sm font-semibold rounded-lg">
+                  {grantingRole ? 'Granting…' : 'Assign role'}
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </Modal>

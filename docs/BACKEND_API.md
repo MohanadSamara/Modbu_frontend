@@ -163,7 +163,8 @@ List all devices. Supports optional query filters:
     "ip": "192.168.1.100",
     "port": 502,
     "status": "offline",
-    "location_id": 10
+    "location_id": 10,
+    "last_seen": "2026-07-06T10:30:00.000Z"
   }
 ]
 ```
@@ -180,7 +181,8 @@ List devices under a location.
     "ip": "192.168.1.100",
     "port": 502,
     "status": "offline",
-    "location_id": 10
+    "location_id": 10,
+    "last_seen": "2026-07-06T10:30:00.000Z"
   }
 ]
 ```
@@ -200,13 +202,27 @@ List devices under a location.
 **Response 201** → `{ "success": true, "device": { ... } }`
 
 ### `PUT /api/devices/:id`
-Update device.
+Update device. Include `last_seen` (ISO-8601 string) to persist a timestamp.
 
 **Body**
 ```json
-{ "name": "New name", "ip": "...", "port": 502, "status": "offline", "location_id": 10 }
+{ "name": "New name", "ip": "...", "port": 502, "status": "online", "location_id": 10, "last_seen": "2026-07-06T10:30:00.000Z" }
 ```
+**Oracle mapping:** `last_seen` → `TO_TIMESTAMP_TZ(:last_seen, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')` stored in `LAST_SEEN` column.
 **Response 200** → `{ "success": true }`
+
+### `PATCH /api/devices/:id/last-seen`
+Set `LAST_SEEN = SYSDATE` for the device. Call this whenever a successful Modbus connection is established.
+
+**No body required.**
+
+**Oracle query:**
+```sql
+UPDATE DEVICES SET LAST_SEEN = SYSDATE WHERE ID = :id
+```
+
+**Response 200** → `{ "success": true, "last_seen": "2026-07-06T10:30:00.000Z" }`
+**Response 404** → `{ "error": "Device not found" }`
 
 ### `DELETE /api/devices/:id`
 **Response 200** → `{ "success": true }`
@@ -282,3 +298,29 @@ curl -X DELETE http://localhost:3000/api/projects/1
 - `ON DELETE CASCADE` on `locations → projects` means deleting a project deletes its locations automatically. `devices → locations` uses `ON DELETE SET NULL`.
 - Enforce the `uq_projects_name` and `uq_locations_proj_name` constraints by returning HTTP `409 Conflict` on ORA-00001 (unique constraint violated).
 - Validate body fields server-side (name required, port 1–65535, ip regex).
+
+### `LAST_SEEN` handling in `PUT /api/devices/:id`
+
+The frontend sends `last_seen` as an ISO-8601 string (e.g. `"2026-07-06T10:30:00.000Z"`) when a device connects. The backend must:
+
+1. Accept the optional `last_seen` field in the PUT body.
+2. Convert it to an Oracle TIMESTAMP and store it in the `LAST_SEEN` column.
+3. Return it as an ISO string in `GET /api/devices`.
+
+Example Oracle update fragment:
+```js
+// node-oracledb
+const sets = ['NAME=:name', 'DEVICE_IP=:ip', 'DEVICE_PORT=:port', 'STATUS=:status'];
+const binds = { name, ip, port, status, id };
+if (last_seen) {
+  sets.push('LAST_SEEN=TO_TIMESTAMP_TZ(:last_seen, \'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"\')');
+  binds.last_seen = last_seen;
+}
+await conn.execute(`UPDATE DEVICES SET ${sets.join(',')} WHERE ID=:id`, binds);
+```
+
+When reading back, map the column:
+```js
+// node-oracledb returns DATE/TIMESTAMP as JS Date objects by default
+// Serialize with: row.LAST_SEEN ? row.LAST_SEEN.toISOString() : null
+```
