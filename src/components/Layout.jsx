@@ -5,6 +5,7 @@ import CommandPalette from './CommandPalette.jsx';
 import EditToolbar from './pageedit/EditToolbar.jsx';
 import GlobalEditLayer from './pageedit/GlobalEditLayer.jsx';
 import { useScrollToHash } from '../hooks/useScrollToHash.js';
+import PageTransition from './anim/PageTransition.jsx';
 
 // Nav catalog lives in config/navItems.jsx so the sidebar and the Ctrl+K
 // command palette always offer the same permission-gated pages.
@@ -348,7 +349,9 @@ export default function Layout() {
         {/* Page content — data-pe-root/route anchor the global visual editor's
             per-page element selectors. */}
         <main className="flex-1 p-6 overflow-auto" data-pe-root data-pe-route={location.pathname}>
-          <Outlet />
+          <PageTransition>
+            <Outlet />
+          </PageTransition>
         </main>
       </div>
 

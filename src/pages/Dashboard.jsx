@@ -7,6 +7,9 @@ import { projectsApi } from '../api/projects.js';
 import { datakomApi } from '../api/datakom.js';
 import DeviceMap from '../components/DeviceMap.jsx';
 import Editable from '../components/pageedit/Editable.jsx';
+import { motion } from 'framer-motion';
+import { silk } from '../lib/motion.js';
+import AnimatedNumber from '../components/anim/AnimatedNumber.jsx';
 
 // Backend returns device rows with Oracle's uppercase keys; normalize the few
 // fields the dashboard needs into a stable shape.
@@ -109,8 +112,10 @@ function groupAlarmsByDevice(rows) {
 // Every overview card shares the same header: a coloured icon tile, a title,
 // and an optional action (arrow link or custom controls) on the right.
 function Card({ icon, iconClass, title, action, children, className = '' }) {
+  // Every overview card enters with the silk seed and lifts slightly on hover
+  // — one shared shell keeps the whole dashboard's motion consistent.
   return (
-    <div className={`card p-6 flex flex-col ${className}`}>
+    <motion.div {...silk.entrance} {...silk.hover} className={`card p-6 flex flex-col ${className}`}>
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
           <span className={`w-10 h-10 rounded-xl flex items-center justify-center ${iconClass}`} aria-hidden="true">
@@ -121,7 +126,7 @@ function Card({ icon, iconClass, title, action, children, className = '' }) {
         {action}
       </div>
       {children}
-    </div>
+    </motion.div>
   );
 }
 
@@ -186,7 +191,7 @@ function HealthDonut({ counts, total }) {
           ))}
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-3xl font-bold text-white leading-none tabular-nums">{total}</span>
+          <span className="text-3xl font-bold text-white leading-none tabular-nums"><AnimatedNumber value={total} /></span>
           <span className="text-xs text-gray-500 mt-1">devices</span>
           {total > 0 && (
             <span className="text-[11px] font-semibold text-emerald-400 mt-0.5 tabular-nums">
@@ -642,7 +647,7 @@ export default function Dashboard() {
             <div className="flex items-end justify-between mt-1">
               <div className="flex items-baseline gap-1.5">
                 <span className="text-4xl font-bold text-white leading-none data-value">
-                  {runStats.hours.toFixed(1)}
+                  <AnimatedNumber value={runStats.hours} decimals={1} />
                 </span>
                 <span className="text-lg font-semibold text-gray-400">hrs</span>
               </div>

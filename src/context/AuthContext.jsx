@@ -11,6 +11,7 @@
 import { createContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { authApi, uiFeaturesApi, uiElementsApi } from '../api/auth';
 import { defaultPermissionFor } from '../config/uiFeatures';
+import { keysSatisfying } from '../config/uiElements';
 import {
   setAccessToken,
   setRefreshToken,
@@ -118,9 +119,14 @@ return () => setAuthFailedHandler(null);
   //     user do X anywhere?"): a grant in ANY scope passes — global, or scoped
   //     to any project/location/device. The precise per-scope enforcement is
   //     done by the backend; here we only decide whether to reveal the UI.
+  // Implications (write → read etc., see config/uiElements.js): a check for a
+  // weaker key also passes when the user holds a stronger key that implies it,
+  // at the same scope. The backend applies the identical expansion, so the UI
+  // never shows something the API would then refuse.
   const hasPermission = useCallback((key, projectId = null) => {
     if (!user?.permissions) return false;
-    return user.permissions.some((p) => p.key === key && permScopeMatches(p, projectId));
+    const accepted = keysSatisfying(key);
+    return user.permissions.some((p) => accepted.includes(p.key) && permScopeMatches(p, projectId));
   }, [user]);
 
   // Like hasPermission but passes if the user holds ANY of `keys`. Used where
@@ -129,7 +135,8 @@ return () => setAuthFailedHandler(null);
   const hasAnyPermission = useCallback((keys, projectId = null) => {
     if (!user?.permissions) return false;
     const list = Array.isArray(keys) ? keys : [keys];
-    return user.permissions.some((p) => list.includes(p.key) && permScopeMatches(p, projectId));
+    const accepted = [...new Set(list.flatMap(keysSatisfying))];
+    return user.permissions.some((p) => accepted.includes(p.key) && permScopeMatches(p, projectId));
   }, [user]);
 
   const hasRole = useCallback((roleKey) => {

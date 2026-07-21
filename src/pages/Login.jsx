@@ -6,6 +6,8 @@
 import { useState } from 'react';
 import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/useAuth.js';
+import { motion } from 'framer-motion';
+import { spring } from '../lib/motion.js';
 
 export default function Login() {
   const { login, isAuthenticated, loading } = useAuth();
@@ -42,7 +44,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0f1117] p-6">
-      <div className="w-full max-w-md">
+      <motion.div {...spring.entrance} className="w-full max-w-md">
         {/* Logo */}
         <div className="flex flex-col items-center gap-3 mb-8">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
@@ -130,9 +132,11 @@ export default function Login() {
             </div>
           )}
 
-          <button
+          <motion.button
             type="submit"
             disabled={submitting}
+            {...spring.hover}
+            {...spring.press}
             className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-700/40
                        text-white text-sm font-semibold rounded-lg transition-colors
                        flex items-center justify-center gap-2"
@@ -141,13 +145,13 @@ export default function Login() {
               <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
             )}
             {submitting ? 'Signing in…' : 'Sign in'}
-          </button>
+          </motion.button>
         </form>
 
         <p className="text-center text-xs text-gray-600 mt-6">
           Need an account? Contact your administrator.
         </p>
-      </div>
+      </motion.div>
     </div>
   );
 }

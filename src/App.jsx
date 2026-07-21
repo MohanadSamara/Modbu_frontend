@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { MotionConfig } from 'framer-motion';
 import Layout from './components/Layout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -31,6 +32,9 @@ function App() {
       }}
     >
       <ErrorBoundary>
+      {/* reducedMotion="user": every framer-motion animation in the app is
+          automatically stripped for users with the OS reduce-motion setting. */}
+      <MotionConfig reducedMotion="user">
       <FeedbackProvider>
       <AuthProvider>
         <SettingsProvider>
@@ -153,6 +157,7 @@ function App() {
         </SettingsProvider>
       </AuthProvider>
       </FeedbackProvider>
+      </MotionConfig>
       </ErrorBoundary>
     </BrowserRouter>
   );

@@ -11,6 +11,8 @@ import { defaultSettings } from '../api/settings.js';
 import { useAuth } from '../context/useAuth.js';
 import { useAlarmSound, getAlarmMuted, setAlarmMuted, subscribeAlarmMuted } from '../hooks/useAlarmSound.js';
 import Editable from '../components/pageedit/Editable.jsx';
+import AnimatedNumber from '../components/anim/AnimatedNumber.jsx';
+import { StaggerGrid, StaggerItem } from '../components/anim/Stagger.jsx';
 
 // Optional Power BI report to embed. Set VITE_POWERBI_URL in a .env file to the
 // "Publish to web" (or secure embed) URL of your report. When empty, we show a
@@ -176,7 +178,7 @@ function DeviceGauge({ device, low, critical, reducedMotion, canMute, isMuted, o
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           {has ? (
             <span className={`text-2xl font-bold tabular-nums leading-none ${c.text}`}>
-              {device.fuel.toFixed(0)}<span className="text-sm">%</span>
+              <AnimatedNumber value={device.fuel} decimals={0} /><span className="text-sm">%</span>
             </span>
           ) : (
             <span className="text-[11px] text-gray-600">Offline</span>
@@ -578,7 +580,7 @@ export default function FuelLevels() {
             <Editable id="fuel.title" as="h1" className="text-xl font-bold text-gray-100">Fuel Levels</Editable>
             <p className="text-xs text-gray-500">
               {withFuel.length} of {rows.length} device{rows.length === 1 ? '' : 's'} reporting
-              {avg != null && <> · avg <span className="text-gray-300">{avg.toFixed(1)}%</span></>}
+              {avg != null && <> · avg <span className="text-gray-300"><AnimatedNumber value={avg} decimals={1} suffix="%" /></span></>}
               {lowCount > 0 && <> · <span className="text-amber-400">{lowCount} low</span></>}
             </p>
           </div>
@@ -665,20 +667,23 @@ export default function FuelLevels() {
         ) : rows.length === 0 ? (
           <div className="rounded-2xl bg-[#1a1d27] border border-white/5 py-16 text-center text-sm text-gray-500">No devices found</div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          <StaggerGrid className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {/* StaggerItem's layout animation makes cards glide to their new
+                spot when live values resort the grid (lowest fuel first). */}
             {gaugeRows.map((r, i) => (
-              <DeviceGauge
-                key={r.id ?? i}
-                device={r}
-                low={low}
-                critical={critical}
-                reducedMotion={reducedMotion}
-                canMute={canReadAlarms}
-                isMuted={mutedDevices.has(r.id)}
-                onToggleMute={toggleDeviceMute}
-              />
+              <StaggerItem key={r.id ?? i}>
+                <DeviceGauge
+                  device={r}
+                  low={low}
+                  critical={critical}
+                  reducedMotion={reducedMotion}
+                  canMute={canReadAlarms}
+                  isMuted={mutedDevices.has(r.id)}
+                  onToggleMute={toggleDeviceMute}
+                />
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerGrid>
         )}
       </div>
 

@@ -18,6 +18,34 @@
 //   • label  — human name shown in the popup
 // ============================================================================
 
+// ── Permission implications ─────────────────────────────────────────────────
+// A stronger permission automatically includes the weaker ones it needs to be
+// usable (write implies read, device actions imply seeing devices, …).
+// MUST stay in sync with the backend copy in Modbus/rbac-defaults.js — the
+// backend enforces the same expansion, this copy only keeps the UI honest.
+export const PERMISSION_IMPLICATIONS = {
+  'device.write':     ['device.read'],
+  'device.connect':   ['device.read'],
+  'device.control':   ['device.read', 'fuel.read'],
+  'device.start':     ['device.read'],
+  'device.stop':      ['device.read'],
+  'project.write':    ['project.read'],
+  'location.write':   ['location.read'],
+  'settings.write':   ['settings.read'],
+  'user.write':       ['user.read'],
+  'user.assign_role': ['user.read'],
+  'datakom.write':    ['datakom.read', 'device.read'],
+};
+
+// All permission keys that satisfy a check for `key` (itself + stronger keys).
+export function keysSatisfying(key) {
+  const out = [key];
+  for (const [strong, implied] of Object.entries(PERMISSION_IMPLICATIONS)) {
+    if (implied.includes(key)) out.push(strong);
+  }
+  return out;
+}
+
 export const UI_ELEMENTS = [
   // ── Alarm ────────────────────────────────────────────────────────────────
   { id: 'alarm.mute',        field: 'alarm',    label: 'Mute alarm sound button' },
