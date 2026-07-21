@@ -139,7 +139,13 @@ export default function DatakomDeviceLive({ did, deviceId, deviceIp, onSyncIp, o
     >
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-[11px] text-gray-500">Live — Datakom Rainbow · did {did}</span>
+        {/* The technical link id (did) is management detail — only users who can
+            manage the link (datakom.write) see it; everyone else just sees the
+            "Live" label. */}
+        <span className="text-[11px] text-gray-500">
+          Live — Datakom Rainbow
+          <Can permission="datakom.write"> · did {did}</Can>
+        </span>
         {onUnlink && (
           <Can permission="datakom.write">
             <button
@@ -157,14 +163,15 @@ export default function DatakomDeviceLive({ did, deviceId, deviceIp, onSyncIp, o
 
       {/* Cloud-reported IP. When it differs from the device's stored IP, offer a
           one-click sync so the device gains a Modbus/IP address pulled from the
-          cloud (only meaningful when a deviceId + device.write are present). */}
+          cloud. The IP is network-infrastructure detail, so the WHOLE row (not
+          just the sync button) is visible only to users with device.write. */}
       {cloudIp && (
-        <div className="flex items-center justify-between gap-2 px-1 text-[11px]">
-          <span className="text-gray-500">
-            Cloud IP <span className="font-mono text-gray-300">{cloudIp}</span>
-          </span>
-          {canOfferIp && (
-            <Can permission="device.write">
+        <Can permission="device.write">
+          <div className="flex items-center justify-between gap-2 px-1 text-[11px]">
+            <span className="text-gray-500">
+              Cloud IP <span className="font-mono text-gray-300">{cloudIp}</span>
+            </span>
+            {canOfferIp && (
               <button
                 type="button"
                 onClick={saveIp}
@@ -173,10 +180,10 @@ export default function DatakomDeviceLive({ did, deviceId, deviceIp, onSyncIp, o
               >
                 {ipBusy ? 'Saving…' : 'Use this IP'}
               </button>
-            </Can>
-          )}
-          {ipMsg && <span className="text-emerald-400">{ipMsg}</span>}
-        </div>
+            )}
+            {ipMsg && <span className="text-emerald-400">{ipMsg}</span>}
+          </div>
+        </Can>
       )}
 
       {/* Same gauge + alarm logic as the Modbus side, fed from Datakom and polled
