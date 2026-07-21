@@ -44,15 +44,15 @@ export default function DatakomProjectTree() {
   };
   useEffect(() => { refreshNodeNames(); }, []);
 
-  // Rename a cloud node: persist the override, then reflect it immediately.
-  // Shaped like the sidebar's onUpdateLocation ({ ok, error }); ignores the
-  // synthetic project id — the node id is all the backend needs.
-  const renameNode = async (_projectId, nodeId, { name }) => {
+  // Persist a cloud-name override, then reflect it immediately. Used for both
+  // nodes (onUpdateLocation) and the wrapper project (onUpdateProject) — the id
+  // is the key the backend stores. Shaped like the sidebar handlers ({ ok, error }).
+  const saveOverride = async (id, name) => {
     try {
-      await datakomApi.setNodeName(nodeId, name);
+      await datakomApi.setNodeName(id, name);
       setNodeNames((prev) => {
         const next = { ...prev };
-        if (name.trim()) next[nodeId] = name.trim(); else delete next[nodeId];
+        if (name.trim()) next[id] = name.trim(); else delete next[id];
         return next;
       });
       return { ok: true };
@@ -60,6 +60,8 @@ export default function DatakomProjectTree() {
       return { ok: false, error: e.message || 'Rename failed' };
     }
   };
+  const renameNode = (_projectId, nodeId, { name }) => saveOverride(nodeId, name);
+  const renameProject = (projectId, { name }) => saveOverride(projectId, name);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,7 +148,7 @@ export default function DatakomProjectTree() {
         onDeleteProject={noop}
         onDeleteLocation={noop}
         onDeleteDevice={noop}
-        onUpdateProject={noop}
+        onUpdateProject={renameProject}
         onUpdateLocation={renameNode}
         onUpdateDevice={noop}
         connectedDeviceIds={onlineIds}

@@ -48,7 +48,14 @@ export function buildSidebarProjects(tree, overrides = {}) {
   }
 
   // readOnly so it can be merged into the editable Projects sidebar without
-  // exposing create/rename/delete controls on cloud-sourced nodes.
-  const projects = [{ id: 'dk-root', name: 'Datakom Rainbow', readOnly: true, locations }];
+  // exposing create/rename/delete controls on cloud-sourced nodes. The wrapper
+  // name itself is locally overridable too (keyed 'dk-root').
+  const projects = [{
+    id: 'dk-root',
+    name: overrides['dk-root'] || 'Datakom Rainbow',
+    cloudName: 'Datakom Rainbow',
+    readOnly: true,
+    locations,
+  }];
   return { projects, deviceIndex, onlineIds };
 }

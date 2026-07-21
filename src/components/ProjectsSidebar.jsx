@@ -288,7 +288,7 @@ function ProjectNode({
   allowLocationRename = false,
   datakom = null,
 }) {
-  const { canFeature, canUseElement } = useAuth();
+  const { canFeature, canUseElement, hasPermission } = useAuth();
   // A single project can opt into read-only (e.g. the merged Datakom Rainbow
   // cloud tree) even when the rest of the sidebar is editable.
   const effReadOnly = readOnly || !!project.readOnly;
@@ -296,7 +296,17 @@ function ProjectNode({
   // project's own Datakom node).
   const dkLocationOptions = !effReadOnly ? (datakom?.allNodes ?? []) : [];
   const canWriteProject = !effReadOnly && canFeature('button.project.write');
-  const canEditProject = canWriteProject && canUseElement('project.rename');
+  // The Datakom Rainbow wrapper (id 'dk-…') is read-only cloud data, but its
+  // DISPLAY name can be overridden locally by datakom.write holders — same
+  // mechanism as the nodes below it.
+  const isDatakomProject = String(project.id).startsWith('dk-');
+  const canEditProject =
+    (canWriteProject && canUseElement('project.rename')) ||
+    (allowLocationRename && isDatakomProject && hasPermission('datakom.write'));
+  // Datakom rename pencils are shown always (not hover-only) so they're findable.
+  const editVis = (allowLocationRename && isDatakomProject)
+    ? 'opacity-60 hover:opacity-100'
+    : 'opacity-0 group-hover:opacity-100';
 
   const open = !!expandedProjects[project.id];
   const active = activeProjectId === project.id;
@@ -339,8 +349,8 @@ function ProjectNode({
         {canEditProject && (
           <button
             onClick={startEdit}
-            title="Edit project"
-            className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-1 rounded-lg text-gray-600 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+            title={isDatakomProject ? 'Rename' : 'Edit project'}
+            className={`${editVis} flex-shrink-0 p-1 rounded-lg text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all`}
           >
             <PencilIcon />
           </button>
@@ -472,6 +482,10 @@ function LocationNode({
   const canEditLocation =
     (canWriteProject && canUseElement('project.rename')) ||
     (allowLocationRename && isDatakomNode && hasPermission('datakom.write'));
+  // Datakom rename pencils are shown always (not hover-only) so they're findable.
+  const editVis = (allowLocationRename && isDatakomNode)
+    ? 'opacity-60 hover:opacity-100'
+    : 'opacity-0 group-hover:opacity-100';
 
   const open = !!expandedLocations[location.id];
   const active = activeLocationId === location.id;
@@ -528,8 +542,8 @@ function LocationNode({
         {canEditLocation && (
           <button
             onClick={startEdit}
-            title="Edit location"
-            className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-0.5 rounded text-gray-600 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+            title={isDatakomNode ? 'Rename' : 'Edit location'}
+            className={`${editVis} flex-shrink-0 p-0.5 rounded text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all`}
           >
             <PencilIcon />
           </button>

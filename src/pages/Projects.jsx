@@ -1130,6 +1130,17 @@ const [locationInputs, setLocationInputs] = useState({});
   const handleUpdateProject = async (projectId, draft) => {
     const name = String(draft.name ?? '').trim();
     if (!name) return { ok: false, error: 'Name is required' };
+    // Datakom Rainbow wrapper (read-only cloud): store a local name override
+    // (keyed by the project id, e.g. 'dk-root') rather than a DB update.
+    if (String(projectId).startsWith('dk-')) {
+      try {
+        await datakomApi.setNodeName(projectId, name);
+        setDatakomNodeNames((prev) => ({ ...prev, [projectId]: name }));
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message || 'Rename failed' };
+      }
+    }
     const project = projects.find((p) => p.id === projectId);
     if (project?.backendId) {
       try { await projectsApi.update(project.backendId, { name }); }
