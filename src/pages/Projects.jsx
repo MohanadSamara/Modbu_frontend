@@ -187,6 +187,23 @@ async function processLocationsWithDevices(locations) {
   return result;
 }
 
+// Nest a flat project list into a tree by parentId (a project's parentId is the
+// BACKEND id of its container). Top-level = parentId null or a missing parent.
+// Each node gains a `childProjects` array. `projects` state stays flat — this
+// runs only at render, so all the flat find/update operations keep working.
+function nestByParent(flat) {
+  const nodes = (flat || []).map((p) => ({ ...p, childProjects: [] }));
+  const byBackendId = new Map();
+  for (const n of nodes) if (n.backendId != null) byBackendId.set(n.backendId, n);
+  const roots = [];
+  for (const n of nodes) {
+    const parent = n.parentId != null ? byBackendId.get(n.parentId) : null;
+    if (parent && parent !== n) parent.childProjects.push(n);
+    else roots.push(n);
+  }
+  return roots;
+}
+
 async function loadProjectsTreeFromBackend() {
   // Errors propagate to the caller, which shows the "working offline" warning.
   const rawProjects = await projectsApi.list();
@@ -211,6 +228,9 @@ async function loadProjectsTreeFromBackend() {
         brandId: numOrNull(pick(p, 'brand_id', 'BRAND_ID')),
         brandName: pick(p, 'brand_name', 'BRAND_NAME') ?? null,
         method: pick(p, 'method', 'METHOD') ?? 'ip',
+        // Container nesting: the BACKEND id of the parent project (null = top
+        // level). Nested into childProjects at render time (see nestByParent).
+        parentId: numOrNull(pick(p, 'parent_id', 'PARENT_ID')),
         locations
       };
     })
@@ -645,9 +665,18 @@ const [locationInputs, setLocationInputs] = useState({});
   // The Datakom project is appended so both live in one sidebar. Its nodes carry
   // 'dk-' ids and the project is flagged readOnly, so ProjectsSidebar hides all
   // create/edit/delete controls on it while keeping DB projects editable.
-  const sidebarProjects = useMemo(
-    () => (datakomProjects.length ? [...projects, ...datakomProjects] : projects),
-    [projects, datakomProjects]
+  const sidebarProjects = useMemo(() => {
+    const nested = nestByParent(projects);
+    return datakomProjects.length ? [...nested, ...datakomProjects] : nested;
+  }, [projects, datakomProjects]);
+
+  // Flat list of DB projects offered as container targets in the project edit
+  // form (value = backend id). Datakom projects can't be containers.
+  const projectContainerOptions = useMemo(
+    () => projects
+      .filter((p) => p.backendId != null)
+      .map((p) => ({ backendId: p.backendId, name: p.name })),
+    [projects]
   );
 
   // Union the Datakom "online" leaf ids into the connected set so their status
@@ -1130,12 +1159,14 @@ const [locationInputs, setLocationInputs] = useState({});
   // Each returns { ok } or { ok:false, error } so the editing node can show a
   // message and stay open on failure.
 
-  // Rename a project. `draft` = { name }.
+  // Rename a project and/or move it into a container. `draft` = { name,
+  // parentId? } where parentId is the BACKEND id of the container (null = top
+  // level, undefined = leave unchanged).
   const handleUpdateProject = async (projectId, draft) => {
     const name = String(draft.name ?? '').trim();
     if (!name) return { ok: false, error: 'Name is required' };
-    // Datakom Rainbow wrapper (read-only cloud): store a local name override
-    // (keyed by the project id, e.g. 'dk-root') rather than a DB update.
+    // Datakom Rainbow nodes (read-only cloud): store a local name override
+    // (keyed by the project id) rather than a DB update. They can't be nested.
     if (String(projectId).startsWith('dk-')) {
       try {
         await datakomApi.setNodeName(projectId, name);
@@ -1146,11 +1177,21 @@ const [locationInputs, setLocationInputs] = useState({});
       }
     }
     const project = projects.find((p) => p.id === projectId);
+    const movingContainer = Object.prototype.hasOwnProperty.call(draft, 'parentId');
+    const newParentId = movingContainer
+      ? (draft.parentId === '' || draft.parentId == null ? null : Number(draft.parentId))
+      : undefined;
     if (project?.backendId) {
-      try { await projectsApi.update(project.backendId, { name }); }
+      const payload = { name };
+      if (movingContainer) payload.parent_id = newParentId;
+      try { await projectsApi.update(project.backendId, payload); }
       catch (err) { return { ok: false, error: `Update failed: ${err.message}` }; }
     }
-    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, name } : p)));
+    setProjects((prev) => prev.map((p) =>
+      p.id === projectId
+        ? { ...p, name, ...(movingContainer ? { parentId: newParentId } : {}) }
+        : p
+    ));
     return { ok: true };
   };
 
@@ -1549,6 +1590,8 @@ const [locationInputs, setLocationInputs] = useState({});
         {/* Sidebar */}
         <ProjectsSidebar
           projects={sidebarProjects}
+          // Candidate containers for the project edit form's "inside" dropdown.
+          projectContainerOptions={projectContainerOptions}
           // Datakom nodes (read-only cloud) can still be renamed locally by
           // datakom.write holders; the sidebar shows a pencil on those nodes.
           allowLocationRename

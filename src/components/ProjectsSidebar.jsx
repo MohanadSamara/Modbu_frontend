@@ -117,6 +117,8 @@ export default function ProjectsSidebar({
   // tree: cloud data is otherwise read-only, but a node's DISPLAY name can be
   // overridden locally by users with datakom.write). Wired to onUpdateLocation.
   allowLocationRename = false,
+  // Candidate containers for the project edit form ([{ backendId, name }]).
+  projectContainerOptions = [],
   title = 'Projects',
   // Cascade helpers/handlers for building DB entities from the Datakom Rainbow
   // tree. Null when the page isn't offering the integration.
@@ -258,6 +260,7 @@ export default function ProjectsSidebar({
                 onAcceptAlarm={onAcceptAlarm}
                 readOnly={readOnly}
                 allowLocationRename={allowLocationRename}
+                projectContainerOptions={projectContainerOptions}
                 datakom={datakom}
               />
             ))}
@@ -286,6 +289,7 @@ function ProjectNode({
   alarmsMap, onAcceptAlarm,
   readOnly = false,
   allowLocationRename = false,
+  projectContainerOptions = [],
   datakom = null,
 }) {
   const { canFeature, canUseElement, hasPermission } = useAuth();
@@ -300,7 +304,9 @@ function ProjectNode({
   // Devices that hang directly off a project (Datakom nodes promoted to
   // projects carry their own devices; normal DB projects have none here).
   const directDevices = (project.devices ?? []).filter(shouldShowDevice);
-  const itemCount = project.locations.length + (project.devices?.length ?? 0);
+  // Child projects (this project acting as a container). Rendered recursively.
+  const childProjects = project.childProjects ?? [];
+  const itemCount = project.locations.length + (project.devices?.length ?? 0) + childProjects.length;
   // The Datakom Rainbow wrapper (id 'dk-…') is read-only cloud data, but its
   // DISPLAY name can be overridden locally by datakom.write holders — same
   // mechanism as the nodes below it.
@@ -318,21 +324,65 @@ function ProjectNode({
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(project.name);
+  const [parentDraft, setParentDraft] = useState(project.parentId ?? '');
   const [editErr, setEditErr] = useState('');
   // Add-location "+" menu (only when this project has Datakom child options).
   const [locMenuOpen, setLocMenuOpen] = useState(false);
 
-  const startEdit = () => { setDraft(project.name); setEditErr(''); setEditing(true); };
+  // Only real DB projects can be nested; a Datakom project has no backend id
+  // and offers no container dropdown (name-only rename). Exclude self from the
+  // container choices (backend also rejects cycles).
+  const showContainerSelect = !isDatakomProject && canWriteProject;
+  const containerChoices = projectContainerOptions.filter((o) => o.backendId !== project.backendId);
+
+  const startEdit = () => { setDraft(project.name); setParentDraft(project.parentId ?? ''); setEditErr(''); setEditing(true); };
   const saveEdit = async () => {
-    const res = await onUpdateProject(project.id, { name: draft });
+    const payload = { name: draft };
+    if (showContainerSelect) payload.parentId = parentDraft === '' ? null : Number(parentDraft);
+    const res = await onUpdateProject(project.id, payload);
     if (res?.ok) setEditing(false); else setEditErr(res?.error || 'Update failed');
   };
 
   return (
     <li>
       {editing ? (
-        <InlineEditRow value={draft} onChange={setDraft} onSave={saveEdit}
-          onCancel={() => setEditing(false)} error={editErr} />
+        showContainerSelect ? (
+          <div className="rounded-xl bg-[#0f1117] border border-white/10 p-2 space-y-1.5">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveEdit(); } if (e.key === 'Escape') setEditing(false); }}
+              className={treeInput}
+              autoFocus
+              placeholder="Project name"
+            />
+            <select
+              value={parentDraft}
+              onChange={(e) => setParentDraft(e.target.value)}
+              className={`${treeInput} cursor-pointer`}
+              title="Put this project inside a container"
+            >
+              <option value="" className="bg-[#0f1117]">— Top level (no container) —</option>
+              {containerChoices.map((o) => (
+                <option key={o.backendId} value={o.backendId} className="bg-[#0f1117]">Inside: {o.name}</option>
+              ))}
+            </select>
+            <div className="flex gap-1.5">
+              <button onClick={saveEdit}
+                className="flex-1 py-1 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-colors">
+                Save
+              </button>
+              <button onClick={() => setEditing(false)}
+                className="px-2 py-1 rounded-lg bg-white/10 text-gray-300 text-xs hover:bg-white/20 transition-colors">
+                Cancel
+              </button>
+            </div>
+            {editErr && <p className="text-[10px] text-red-400">{editErr}</p>}
+          </div>
+        ) : (
+          <InlineEditRow value={draft} onChange={setDraft} onSave={saveEdit}
+            onCancel={() => setEditing(false)} error={editErr} />
+        )
       ) : (
       <div className={`group flex items-center gap-1.5 px-2 py-2 rounded-xl transition-colors
         ${active ? 'bg-blue-500/10 text-blue-300' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'}`}
@@ -373,6 +423,40 @@ function ProjectNode({
 
       {open && (
         <div className="ml-4 border-l border-white/5 pl-3 mt-1 space-y-1">
+          {/* Child projects — this project acts as a container. Rendered as full
+              (recursive) ProjectNodes so they carry their own locations/devices
+              and can themselves be containers. */}
+          {childProjects.length > 0 && (
+            <ul className="space-y-1">
+              {childProjects.map((child) => (
+                <ProjectNode
+                  key={child.id}
+                  project={child}
+                  expandedProjects={expandedProjects} toggleProject={toggleProject}
+                  expandedLocations={expandedLocations} toggleLocation={toggleLocation}
+                  activeProjectId={activeProjectId} activeLocationId={activeLocationId} activeDeviceId={activeDeviceId}
+                  setActiveProjectId={setActiveProjectId} setActiveLocationId={setActiveLocationId} setActiveDeviceId={setActiveDeviceId}
+                  locationInputs={locationInputs} setLocationInputs={setLocationInputs}
+                  onCreateLocation={onCreateLocation}
+                  onDeleteProject={onDeleteProject} onDeleteLocation={onDeleteLocation} onDeleteDevice={onDeleteDevice}
+                  onUpdateProject={onUpdateProject} onUpdateLocation={onUpdateLocation} onUpdateDevice={onUpdateDevice}
+                  connectedDeviceIds={connectedDeviceIds}
+                  addingDeviceFor={addingDeviceFor} startAddDevice={startAddDevice} cancelAddDevice={cancelAddDevice}
+                  deviceDrafts={deviceDrafts} deviceErrors={deviceErrors} updateDeviceDraft={updateDeviceDraft} onCreateDevice={onCreateDevice}
+                  brands={brands}
+                  onCreateSubLocation={onCreateSubLocation} subLocationInputs={subLocationInputs} setSubLocationInputs={setSubLocationInputs}
+                  shouldShowDevice={shouldShowDevice}
+                  alarmsMap={alarmsMap}
+                  onAcceptAlarm={onAcceptAlarm}
+                  readOnly={readOnly}
+                  allowLocationRename={allowLocationRename}
+                  projectContainerOptions={projectContainerOptions}
+                  datakom={datakom}
+                />
+              ))}
+            </ul>
+          )}
+
           {/* Add location. When the project came from Datakom, the + opens a menu
               to name it manually or pick a Datakom node; otherwise it creates. */}
           {canWriteProject && (
@@ -470,7 +554,7 @@ function ProjectNode({
             </ul>
           )}
 
-          {project.locations.length === 0 && directDevices.length === 0 && (
+          {project.locations.length === 0 && directDevices.length === 0 && childProjects.length === 0 && (
             <p className="text-xs text-gray-600 px-1 pb-2">
               {project.datakomProject ? 'No devices.' : 'No locations yet.'}
             </p>
