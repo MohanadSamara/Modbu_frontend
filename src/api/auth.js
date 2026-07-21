@@ -107,6 +107,8 @@ export const rolesApi = {
   getPermissions: (id) => request(`/roles/${id}/permissions`, { prefix: 'Failed to fetch role permissions', timeoutMs: 30000 }),
   grantPermission: (id, permissionKey) => request(`/roles/${id}/permissions`, { method: 'POST', body: { permissionKey }, prefix: 'Failed to grant permission', timeoutMs: 30000 }),
   revokePermission: (id, permId) => request(`/roles/${id}/permissions/${permId}`, { method: 'DELETE', prefix: 'Failed to revoke permission', timeoutMs: 30000 }),
+  // Restore the built-in system roles' default permission sets (custom roles untouched).
+  resetDefaults: () => request('/roles/reset', { method: 'POST', prefix: 'Failed to reset roles', timeoutMs: 30000 }),
 };
 
 export const permissionsApi = {
@@ -118,6 +120,11 @@ export const permissionsApi = {
     request(`/permissions/${id}`, { method: 'PUT', body: patch, prefix: 'Failed to update permission', timeoutMs: 30000 }),
   remove: (id) =>
     request(`/permissions/${id}`, { method: 'DELETE', prefix: 'Failed to delete permission', timeoutMs: 30000 }),
+
+  // Restore the built-in permissions + their default UI-element mappings
+  // (custom permission keys are removed).
+  resetDefaults: () =>
+    request('/permissions/reset', { method: 'POST', prefix: 'Failed to reset permissions', timeoutMs: 30000 }),
 
   // Endpoint mappings — what routes a permission protects.
   listEndpoints: (id) =>

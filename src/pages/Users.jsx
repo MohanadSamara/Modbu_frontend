@@ -16,7 +16,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { usersApi, rolesApi } from '../api/auth';
 import { projectsApi, locationsApi, devicesApi } from '../api/projects';
 import { useAuth } from '../context/useAuth.js';
+import { useToast, useConfirm } from '../context/useFeedback.js';
 import Can from '../components/Can.jsx';
+import Editable from '../components/pageedit/Editable.jsx';
 
 const STATUS_PILL = {
   active:   'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
@@ -26,6 +28,8 @@ const STATUS_PILL = {
 
 export default function Users() {
   const { user: currentUser } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [users, setUsers]       = useState([]);
   const [roles, setRoles]       = useState([]);
@@ -35,6 +39,7 @@ export default function Users() {
 
   const [showCreate, setShowCreate]   = useState(false);
   const [editingUser, setEditingUser] = useState(null); // detailed user incl. roles
+  const [resetUser, setResetUser]     = useState(null); // user whose password is being reset
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -58,24 +63,28 @@ export default function Users() {
 
   // ── Action helpers ──────────────────────────────────────────────────────
   async function handleLock(u)   {
-    if (!confirm(`Lock (disable) ${u.username}? They'll be logged out everywhere.`)) return;
-    try { await usersApi.lock(u.id);   refresh(); } catch (e) { alert(e.message); }
+    if (!(await confirm({
+      title: 'Lock user',
+      message: `Lock (disable) ${u.username}? They'll be logged out everywhere.`,
+      confirmLabel: 'Lock',
+      danger: true,
+    }))) return;
+    try { await usersApi.lock(u.id);   toast.success(`${u.username} locked`); refresh(); } catch (e) { toast.error(e.message); }
   }
   async function handleUnlock(u) {
-    try { await usersApi.unlock(u.id); refresh(); } catch (e) { alert(e.message); }
+    try { await usersApi.unlock(u.id); toast.success(`${u.username} unlocked`); refresh(); } catch (e) { toast.error(e.message); }
   }
   async function handleDelete(u) {
-    if (u.id === currentUser.id) { alert("You can't delete your own account."); return; }
-    if (!confirm(`Permanently delete user "${u.username}"? This cannot be undone.`)) return;
-    try { await usersApi.remove(u.id); refresh(); } catch (e) { alert(e.message); }
+    if (u.id === currentUser.id) { toast.error("You can't delete your own account."); return; }
+    if (!(await confirm({
+      title: 'Delete user',
+      message: `Permanently delete user "${u.username}"? This cannot be undone.`,
+      danger: true,
+    }))) return;
+    try { await usersApi.remove(u.id); toast.success(`User "${u.username}" deleted`); refresh(); } catch (e) { toast.error(e.message); }
   }
-  async function handleReset(u) {
-    const newPassword = prompt(`New password for ${u.username} (>=8 chars):`);
-    if (!newPassword || newPassword.length < 8) return;
-    try {
-      await usersApi.resetPassword(u.id, newPassword);
-      alert(`Password reset. ${u.username} has been logged out everywhere.`);
-    } catch (e) { alert(e.message); }
+  function handleReset(u) {
+    setResetUser(u);
   }
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -92,10 +101,10 @@ export default function Users() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-white text-xl font-semibold">Users & Access Control</h1>
-          <p className="text-gray-500 text-sm mt-0.5">
+          <Editable id="users.title" as="h1" className="text-white text-xl font-semibold">Users & Access Control</Editable>
+          <Editable id="users.subtitle" as="p" className="text-gray-500 text-sm mt-0.5">
             Manage who can sign in and what they can do.
-          </p>
+          </Editable>
         </div>
         <Can permission="user.write">
           <button
@@ -140,7 +149,7 @@ export default function Users() {
                   isMe={u.id === currentUser.id}
                   onView={async () => {
                     try { setEditingUser(await usersApi.get(u.id)); }
-                    catch (e) { alert(e.message); }
+                    catch (e) { toast.error(e.message); }
                   }}
                   onLock={() => handleLock(u)}
                   onUnlock={() => handleUnlock(u)}
@@ -162,6 +171,14 @@ export default function Users() {
         />
       )}
 
+      {/* Reset-password modal */}
+      {resetUser && (
+        <ResetPasswordModal
+          user={resetUser}
+          onClose={() => setResetUser(null)}
+        />
+      )}
+
       {/* Edit / roles modal */}
       {editingUser && (
         <EditUserModal
@@ -178,7 +195,7 @@ export default function Users() {
               ]);
               setUsers(list);
               setEditingUser(fresh);
-            } catch (e) { alert(e.message); }
+            } catch (e) { toast.error(e.message); }
           }}
         />
       )}
@@ -328,8 +345,69 @@ function CreateUserModal({ roles, onClose, onCreated }) {
   );
 }
 
+// ── Reset-password modal ──────────────────────────────────────────────────
+function ResetPasswordModal({ user, onClose }) {
+  const toast = useToast();
+  const [password, setPassword] = useState('');
+  const [touched, setTouched] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const tooShort = password.length < 8;
+  const showError = touched && tooShort;
+
+  async function submit(e) {
+    e.preventDefault();
+    setTouched(true);
+    if (tooShort) return;
+    setSubmitting(true);
+    try {
+      await usersApi.resetPassword(user.id, password);
+      toast.success(`Password reset. ${user.username} has been logged out everywhere.`);
+      onClose();
+    } catch (e) {
+      toast.error(e.detail || e.message);
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title={`Reset password for ${user.username}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        <p className="text-sm text-gray-400">
+          {user.username} will be logged out everywhere and must sign in with the new password.
+        </p>
+        <Field label="New password (>=8 chars)" required>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onBlur={() => setTouched(true)}
+            disabled={submitting}
+            className={`${inputCls} ${showError ? 'border-red-500/50 focus:border-red-500 focus:ring-red-500' : ''}`}
+            autoFocus
+            autoComplete="new-password"
+          />
+        </Field>
+        {showError && (
+          <div className="text-red-300 text-xs">Password must be at least 8 characters.</div>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={submitting}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={submitting || (touched && tooShort)}>
+            {submitting ? 'Resetting…' : 'Reset password'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ── Edit / roles modal ────────────────────────────────────────────────────
 function EditUserModal({ user, roles, projects, onClose, onChange }) {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [form, setForm] = useState({
     email:    user.email   || '',
     fullName: user.fullName || '',
@@ -415,15 +493,15 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
   // selectors, validating that a target is picked for non-global levels.
   function buildScope() {
     if (scopeType === 'project') {
-      if (!scopeProjectId)  { alert('Pick a project for this user.');  return undefined; }
+      if (!scopeProjectId)  { toast.error('Pick a project for this user.');  return undefined; }
       return { projectId: Number(scopeProjectId) };
     }
     if (scopeType === 'location') {
-      if (!scopeLocationId) { alert('Pick a location for this user.'); return undefined; }
+      if (!scopeLocationId) { toast.error('Pick a location for this user.'); return undefined; }
       return { locationId: Number(scopeLocationId) };
     }
     if (scopeType === 'device') {
-      if (!scopeDeviceId)   { alert('Pick a device for this user.');   return undefined; }
+      if (!scopeDeviceId)   { toast.error('Pick a device for this user.');   return undefined; }
       return { deviceId: Number(scopeDeviceId) };
     }
     return null; // global
@@ -463,7 +541,7 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
       setEditingUserRoleId(null);
       await onChange();
     } catch (e) {
-      alert(`Could not update the assignment: ${e.detail || e.message}. The role may have been removed — please re-assign it.`);
+      toast.error(`Could not update the assignment: ${e.detail || e.message}. The role may have been removed — please re-assign it.`);
     } finally {
       setSavingEdit(false);
     }
@@ -475,11 +553,11 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
     // current one is removed. The SAME role may be added again for another
     // target, up to the role's scope_count.
     if (hasRole && roleKey !== currentRoleKey) {
-      alert('This user already has a role. Remove it before assigning a different one.');
+      toast.error('This user already has a role. Remove it before assigning a different one.');
       return;
     }
     if (hasRole && roleKey === currentRoleKey && assignments.length >= maxTargets) {
-      alert(`This role covers ${maxTargets} ${currentRole.scopeLevel}${maxTargets !== 1 ? 's' : ''}. Remove one before adding another.`);
+      toast.error(`This role covers ${maxTargets} ${currentRole.scopeLevel}${maxTargets !== 1 ? 's' : ''}. Remove one before adding another.`);
       return;
     }
     const scope = buildScope();
@@ -489,7 +567,7 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
       await usersApi.grantRole(user.id, roleKey, scope);
       setAddingTarget(false);
       await onChange();
-    } catch (e) { alert(e.detail || e.message); }
+    } catch (e) { toast.error(e.detail || e.message); }
     finally { setGrantingRole(false); }
   }
 
@@ -504,12 +582,17 @@ function EditUserModal({ user, roles, projects, onClose, onChange }) {
   }
 
   async function revokeRole(userRoleId) {
-    if (!confirm('Remove this role from the user?')) return;
+    if (!(await confirm({
+      title: 'Remove role',
+      message: 'Remove this role from the user?',
+      confirmLabel: 'Remove',
+      danger: true,
+    }))) return;
     try {
       await usersApi.revokeRole(user.id, userRoleId);
       setEditingUserRoleId((cur) => (cur === userRoleId ? null : cur));
       await onChange();
-    } catch (e) { alert(e.detail || e.message); }
+    } catch (e) { toast.error(e.detail || e.message); }
   }
 
   // Target selectors (project → location → device), shared by the assign form

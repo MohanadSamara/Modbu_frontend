@@ -9,7 +9,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { brandsApi } from '../api/brands.js';
 import { useAuth } from '../context/useAuth.js';
-
+import { useToast, useConfirm } from '../context/useFeedback.js';
+import { SkeletonTableRows } from '../components/Skeleton.jsx';
+import Editable from '../components/pageedit/Editable.jsx';
 // Oracle returns uppercase keys; normalise the fields we render.
 function normalizeBrand(b) {
   return {
@@ -29,6 +31,8 @@ function formatDate(ts) {
 
 export default function Brands() {
   const { hasPermission } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
   const canWrite = hasPermission('device.write');
 
   const [brands, setBrands] = useState([]);
@@ -67,12 +71,13 @@ export default function Brands() {
     const msg = brand.deviceCount > 0
       ? `Delete "${brand.name}"? It will be removed from ${brand.deviceCount} device(s).`
       : `Delete "${brand.name}"?`;
-    if (!confirm(msg)) return;
+    if (!(await confirm({ title: 'Delete brand', message: msg, danger: true }))) return;
     try {
       await brandsApi.remove(brand.id);
+      toast.success(`Brand "${brand.name}" deleted`);
       reload();
     } catch (e) {
-      alert(e.message);
+      toast.error(e.message);
     }
   }
 
@@ -88,8 +93,8 @@ export default function Brands() {
             </svg>
           </span>
           <div>
-            <h1 className="text-base font-bold uppercase tracking-wide text-gray-100">Brands</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Manage device brands. Assign them to devices on the Connections page.</p>
+            <Editable id="brands.title" as="h1" className="text-base font-bold uppercase tracking-wide text-gray-100">Brands</Editable>
+            <Editable id="brands.subtitle" as="p" className="text-xs text-gray-500 mt-0.5">Manage device brands. Assign them to devices on the Connections page.</Editable>
           </div>
         </div>
 
@@ -145,7 +150,7 @@ export default function Brands() {
               {error ? (
                 <tr><td colSpan={4} className="px-6 py-10 text-center text-sm text-red-400">{error}</td></tr>
               ) : loading ? (
-                <tr><td colSpan={4} className="px-6 py-10 text-center text-sm text-gray-500">Loading brands…</td></tr>
+                <SkeletonTableRows rows={4} cols={4} />
               ) : visible.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-6 py-12 text-center">

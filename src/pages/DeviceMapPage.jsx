@@ -4,6 +4,8 @@ import { modbusApi } from '../api/modbus.js';
 import { devicesApi } from '../api/projects.js';
 import { useAuth } from '../context/useAuth.js';
 import DeviceMap from '../components/DeviceMap.jsx';
+import { SkeletonList } from '../components/Skeleton.jsx';
+import Editable from '../components/pageedit/Editable.jsx';
 
 function num(v) {
   if (v === null || v === undefined || v === '') return null;
@@ -218,7 +220,7 @@ export default function DeviceMapPage() {
             </svg>
           </span>
           <div>
-            <h1 className="text-xl font-bold text-gray-100">Device Map</h1>
+            <Editable id="map.title" as="h1" className="text-xl font-bold text-gray-100">Device Map</Editable>
             <p className="text-xs text-gray-500">
               {located.length} of {devices.length} device{devices.length === 1 ? '' : 's'} mapped · {online} online
             </p>
@@ -316,7 +318,7 @@ export default function DeviceMapPage() {
 
           <div className="space-y-1 overflow-y-auto max-h-[560px] pr-1">
             {loading ? (
-              <div className="py-10 text-center text-sm text-gray-500">Loading devices…</div>
+              <SkeletonList rows={6} height="h-12" className="p-0" />
             ) : error ? (
               <div className="py-10 text-center text-sm text-red-400">{error}</div>
             ) : listed.length === 0 ? (

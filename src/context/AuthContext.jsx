@@ -11,12 +11,6 @@
 import { createContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { authApi, uiFeaturesApi, uiElementsApi } from '../api/auth';
 import { defaultPermissionFor } from '../config/uiFeatures';
-
-// The level of a permission key ('alarm.write' → 'write'). read = view only.
-function levelOfKey(key) {
-  const parts = String(key || '').split('.');
-  return (parts[1] || '').toLowerCase();
-}
 import {
   setAccessToken,
   setRefreshToken,
@@ -25,6 +19,12 @@ import {
   setAuthFailedHandler,
   refreshAccessToken,
 } from '../api/http';
+
+// The level of a permission key ('alarm.write' → 'write'). read = view only.
+function levelOfKey(key) {
+  const parts = String(key || '').split('.');
+  return (parts[1] || '').toLowerCase();
+}
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext(null);

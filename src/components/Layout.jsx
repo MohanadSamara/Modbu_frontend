@@ -1,117 +1,47 @@
 import { useState, useRef, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/useAuth.js';
+import CommandPalette from './CommandPalette.jsx';
+import EditToolbar from './pageedit/EditToolbar.jsx';
+import GlobalEditLayer from './pageedit/GlobalEditLayer.jsx';
+import { useScrollToHash } from '../hooks/useScrollToHash.js';
 
-// Each nav item is gated by a UI-feature id (see config/uiFeatures.js), so an
-// admin can change which permission reveals it from the UI Access page.
-const NAV_ITEMS = [
-  {
-    to: '/',
-    label: 'Dashboard',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-      </svg>
-    ),
-  },
-  {
-    to: '/projects',
-    label: 'Projects',
-    // A device-only viewer sees a flat device list, so the link is "Devices".
-    feature: 'nav.projects',
-    labelFor: (has) => (has('project.read') ? 'Projects' : 'Devices'),
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    to: '/brands',
-    label: 'Brands',
-    feature: 'nav.brands',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-7 7a2 2 0 01-2.82 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" />
-      </svg>
-    ),
-  },
-  {
-    to: '/events',
-    label: 'Events',
-    feature: 'nav.events',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-      </svg>
-    ),
-  },
-  {
-    to: '/settings',
-    label: 'Settings',
-    feature: 'nav.settings',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
-  },
-  // Admin-only section — hidden for users without these permissions
-  {
-    to: '/users',
-    label: 'Users',
-    section: 'Administration',
-    feature: 'nav.users',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-5.13a4 4 0 11-8 0 4 4 0 018 0zm6 3a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
-  },
-  {
-    to: '/audit',
-    label: 'Audit log',
-    section: 'Administration',
-    feature: 'nav.audit',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    to: '/roles',
-    label: 'Roles',
-    section: 'Administration',
-    feature: 'nav.roles',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M12 9v3m0 3h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-      </svg>
-    ),
-  },
-  {
-    to: '/permissions',
-    label: 'Permissions',
-    section: 'Administration',
-    feature: 'nav.permissions',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-      </svg>
-    ),
-  },
-];
+// Nav catalog lives in config/navItems.jsx so the sidebar and the Ctrl+K
+// command palette always offer the same permission-gated pages.
+import { NAV_ITEMS } from '../config/navItems.jsx';
+
+// ── Backend health ──────────────────────────────────────────────────────
+// Polls the backend so the header pill shows the REAL connection state
+// instead of a hardcoded label. Any HTTP answer (even 401/404) proves the
+// server is reachable; the dev proxy answers 5xx / throws when it's down.
+function useBackendHealth(intervalMs = 20_000) {
+  const [status, setStatus] = useState('checking'); // 'online' | 'offline' | 'checking'
+  useEffect(() => {
+    let alive = true;
+    const ping = async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      try {
+        const res = await fetch('/api/health', { signal: ctrl.signal });
+        if (alive) setStatus(res.status < 500 ? 'online' : 'offline');
+      } catch {
+        if (alive) setStatus('offline');
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    ping();
+    const id = setInterval(ping, intervalMs);
+    return () => { alive = false; clearInterval(id); };
+  }, [intervalMs]);
+  return status;
+}
+
+const HEALTH_META = {
+  online:   { dot: 'bg-emerald-400', text: 'text-gray-400',  label: 'Backend online' },
+  offline:  { dot: 'bg-red-400',     text: 'text-red-300',   label: 'Backend offline' },
+  checking: { dot: 'bg-amber-400 animate-pulse', text: 'text-gray-400', label: 'Checking…' },
+};
 
 export default function Layout() {
   const location = useLocation();
@@ -119,9 +49,27 @@ export default function Layout() {
   const { user, logout, hasPermission, canFeature } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const userMenuRef = useRef(null);
+  const health = useBackendHealth();
+  const healthMeta = HEALTH_META[health] ?? HEALTH_META.checking;
 
-  // Close the user menu when clicking outside
+  // Deep-link support for Ctrl+K search: scroll to & highlight #hash targets.
+  useScrollToHash();
+
+  // Ctrl+K / Cmd+K toggles the command palette from anywhere
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Close the user menu when clicking outside or pressing Escape
   useEffect(() => {
     if (!userMenuOpen) return;
     const onDocClick = (e) => {
@@ -129,8 +77,13 @@ export default function Layout() {
         setUserMenuOpen(false);
       }
     };
+    const onKey = (e) => { if (e.key === 'Escape') setUserMenuOpen(false); };
     document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [userMenuOpen]);
 
   async function handleLogout() {
@@ -214,6 +167,7 @@ export default function Layout() {
                         key={to}
                         to={to}
                         onClick={() => setSidebarOpen(false)}
+                        aria-current={active ? 'page' : undefined}
                         className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200
                           ${active
                             ? 'bg-blue-500/15 text-blue-400 shadow-sm'
@@ -234,13 +188,16 @@ export default function Layout() {
           })()}
         </nav>
 
-        {/* Footer */}
-        <div className="px-4 py-4 border-t border-white/5">
-          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-white/5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-gray-400">System Online</span>
+        {/* Footer — surfaced only when the backend is NOT healthy; a steady
+            "online" badge here was redundant noise. */}
+        {health !== 'online' && (
+          <div className="px-4 py-4 border-t border-white/5">
+            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-white/5" role="status" aria-live="polite">
+              <span className={`w-2 h-2 rounded-full ${healthMeta.dot}`} />
+              <span className={`text-xs ${healthMeta.text}`}>{healthMeta.label}</span>
+            </div>
           </div>
-        </div>
+        )}
       </aside>
 
       {/* Overlay for mobile */}
@@ -259,6 +216,8 @@ export default function Layout() {
           <button
             className="lg:hidden p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
             onClick={() => setSidebarOpen((v) => !v)}
+            aria-label="Toggle navigation menu"
+            aria-expanded={sidebarOpen}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -282,10 +241,36 @@ export default function Layout() {
 
           {/* Right side */}
           <div className="flex items-center gap-3 ml-auto">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-gray-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              Backend connected
-            </div>
+            {/* Command palette trigger */}
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10
+                text-xs text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+              aria-label="Open command palette"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              Search
+              <kbd className="px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px]">Ctrl K</kbd>
+            </button>
+
+            {/* Health chip — shown only when the backend is offline/checking;
+                a permanent "online" chip was redundant with the rest of the UI. */}
+            {health !== 'online' && (
+              <div
+                className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border text-xs ${healthMeta.text} ${
+                  health === 'offline' ? 'border-red-500/30 bg-red-500/5' : 'border-white/10'
+                }`}
+                role="status"
+                aria-live="polite"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${healthMeta.dot}`} />
+                {healthMeta.label}
+              </div>
+            )}
 
             {/* User menu */}
             <div className="relative" ref={userMenuRef}>
@@ -293,6 +278,9 @@ export default function Layout() {
                 type="button"
                 onClick={() => setUserMenuOpen((v) => !v)}
                 className="flex items-center gap-2 pl-2 pr-2.5 py-1 rounded-full hover:bg-white/5 transition-colors"
+                aria-label="User menu"
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
               >
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white text-xs font-bold shadow">
                   {initials}
@@ -357,11 +345,18 @@ export default function Layout() {
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 p-6 overflow-auto">
+        {/* Page content — data-pe-root/route anchor the global visual editor's
+            per-page element selectors. */}
+        <main className="flex-1 p-6 overflow-auto" data-pe-root data-pe-route={location.pathname}>
           <Outlet />
         </main>
       </div>
+
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+
+      {/* Admin-only visual page editor (self-gates; renders nothing for others) */}
+      <GlobalEditLayer />
+      <EditToolbar />
     </div>
   );
 }

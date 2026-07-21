@@ -10,11 +10,29 @@
 // Tokens:
 //   • access token  — kept in memory only (lost on hard reload, that's fine —
 //     we use the refresh token to mint a new one on first request)
-//   • refresh token — stored in localStorage so login survives reload
+//   • refresh token — stored in sessionStorage: it survives an in-tab reload
+//     (so navigating around / refreshing keeps you signed in) but is cleared
+//     when the tab/browser is closed, so ending the site requires a re-login.
 // ============================================================================
 
 const API_BASE = '/api';
 const REFRESH_KEY = 'modbus.refreshToken';
+
+// Session-scoped storage for the refresh token. Falls back to an in-memory
+// shim if sessionStorage is unavailable (e.g. privacy modes), which still
+// clears on tab close — matching the desired "log out when the site ends".
+const tokenStore =
+  typeof sessionStorage !== 'undefined' ? sessionStorage : {
+    _v: null,
+    getItem() { return this._v; },
+    setItem(_k, v) { this._v = v; },
+    removeItem() { this._v = null; },
+  };
+
+// One-time migration: older builds persisted the refresh token in localStorage,
+// which kept users logged in across browser restarts. Drop it on load so that
+// stale long-lived session can't survive — sessions now end when the tab closes.
+try { localStorage.removeItem(REFRESH_KEY); } catch { /* ignore */ }
 
 // ── Token storage ─────────────────────────────────────────────────────────
 let _accessToken = null;
@@ -29,17 +47,20 @@ export function getAccessToken() {
 }
 
 export function setRefreshToken(token) {
-  if (token) localStorage.setItem(REFRESH_KEY, token);
-  else       localStorage.removeItem(REFRESH_KEY);
+  if (token) tokenStore.setItem(REFRESH_KEY, token);
+  else       tokenStore.removeItem(REFRESH_KEY);
 }
 
 export function getRefreshToken() {
-  return localStorage.getItem(REFRESH_KEY);
+  return tokenStore.getItem(REFRESH_KEY);
 }
 
 export function clearTokens() {
   _accessToken = null;
-  localStorage.removeItem(REFRESH_KEY);
+  tokenStore.removeItem(REFRESH_KEY);
+  // Clean up any token left in localStorage by an older build so a stale
+  // long-lived session can't resurrect a login after this change.
+  try { localStorage.removeItem(REFRESH_KEY); } catch { /* ignore */ }
 }
 
 export function setAuthFailedHandler(fn) {

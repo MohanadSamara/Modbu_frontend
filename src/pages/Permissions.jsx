@@ -15,6 +15,8 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { permissionsApi, uiElementCatalogApi } from '../api/auth.js';
 import { UI_ELEMENTS as FALLBACK_ELEMENTS } from '../config/uiElements.js';
+import { useToast, useConfirm } from '../context/useFeedback.js';
+import Editable from '../components/pageedit/Editable.jsx';
 
 // Build the lookup helpers (fields / elementsForField / byId) from a flat
 // catalog array of { id, field, label }. Keeps components independent of where
@@ -46,6 +48,8 @@ function permResource(perm) {
 }
 
 export default function Permissions() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [permissions, setPermissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
@@ -76,13 +80,35 @@ export default function Permissions() {
 
   useEffect(() => { refresh(); refreshCatalog(); }, [refresh, refreshCatalog]);
 
+  const [resetting, setResetting] = useState(false);
+
   async function handleDelete(perm) {
     if (perm.isBuiltin) return;
-    if (!confirm(`Delete permission "${perm.key}"? It will be removed from every role that has it.`)) return;
+    if (!(await confirm({
+      title: 'Delete permission',
+      message: `Delete permission "${perm.key}"? It will be removed from every role that has it.`,
+      danger: true,
+    }))) return;
     try {
       await permissionsApi.remove(perm.id);
+      toast.success(`Permission "${perm.key}" deleted`);
       refresh();
-    } catch (e) { alert(e.detail || e.message); }
+    } catch (e) { toast.error(e.detail || e.message); }
+  }
+
+  async function handleReset() {
+    if (!(await confirm({
+      title: 'Restore default permissions',
+      message: 'This deletes every custom permission key, restores the built-in permissions, and rebuilds their default UI-element mappings. Custom permissions cannot be recovered. Continue?',
+      danger: true,
+    }))) return;
+    setResetting(true);
+    try {
+      await permissionsApi.resetDefaults();
+      toast.success('Permissions restored to defaults');
+      await Promise.all([refresh(), refreshCatalog()]);
+    } catch (e) { toast.error(e.detail || e.message); }
+    finally { setResetting(false); }
   }
 
   if (loading) return <Loader />;
@@ -91,19 +117,29 @@ export default function Permissions() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-white text-xl font-semibold">Permissions</h1>
-          <p className="text-gray-500 text-sm mt-0.5">
+          <Editable id="permissions.title" as="h1" className="text-white text-xl font-semibold">Permissions</Editable>
+          <Editable id="permissions.subtitle" as="p" className="text-gray-500 text-sm mt-0.5">
             The catalog of permission keys the app checks. Editing one lets you pick the
             UI elements it controls. Assign permissions to roles on the Roles page.
-          </p>
+          </Editable>
         </div>
-        <button onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New permission
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={handleReset} disabled={resetting}
+            title="Restore the built-in permissions and their default UI-element mappings"
+            className="px-4 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 text-gray-300 text-sm font-semibold rounded-lg flex items-center gap-2 border border-white/10">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {resetting ? 'Resetting…' : 'Reset to defaults'}
+          </button>
+          <button onClick={() => setShowCreate(true)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New permission
+          </button>
+        </div>
       </div>
 
       {error && <ErrorBox msg={error} />}

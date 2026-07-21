@@ -33,6 +33,21 @@ export const systemSettingsApi = {
     }),
 };
 
+// ── Page content overrides (admin visual page editor) ───────────────────
+// Backs the <Editable> override store. GET is readable by any authenticated
+// user (so design edits render for everyone); PUT requires settings.write.
+export const pageContentApi = {
+  get: () =>
+    request('/page-content', { prefix: 'Failed to fetch page content' }),
+
+  update: (overrides) =>
+    request('/page-content', {
+      method: 'PUT',
+      body: { overrides },
+      prefix: 'Failed to save page content',
+    }),
+};
+
 // ── Default values (used as fallback when the API is unreachable) ───────
 export const defaultSettings = {
   // Tank/Fuel Alarm Settings
@@ -40,6 +55,7 @@ export const defaultSettings = {
   CRITICAL_TANK_THRESHOLD: 10,
   CONSUMPTION_RATE_THRESHOLD: 5,
   FUEL_ALERTS_ENABLED: true,
+  ALARM_COOLDOWN_MINUTES: 60,
 
   // Tank Capacity Settings
   TANK_CAPACITY_LITERS: 1000,

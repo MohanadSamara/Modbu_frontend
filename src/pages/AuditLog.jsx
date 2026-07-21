@@ -7,6 +7,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { auditApi } from '../api/auth';
+import { SkeletonList } from '../components/Skeleton.jsx';
+import Editable from '../components/pageedit/Editable.jsx';
 
 const EVENT_STYLE = {
   LOGIN_OK:        { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30', label: 'Login' },
@@ -48,10 +50,10 @@ export default function AuditLog() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-white text-xl font-semibold">Audit Log</h1>
-          <p className="text-gray-500 text-sm mt-0.5">
+          <Editable id="audit.title" as="h1" className="text-white text-xl font-semibold">Audit Log</Editable>
+          <Editable id="audit.subtitle" as="p" className="text-gray-500 text-sm mt-0.5">
             Authentication events from across the system.
-          </p>
+          </Editable>
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -96,9 +98,7 @@ export default function AuditLog() {
 
       <div className="bg-[#13151c] border border-white/5 rounded-2xl overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400">
-            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          </div>
+          <SkeletonList rows={8} height="h-9" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

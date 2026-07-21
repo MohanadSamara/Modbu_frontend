@@ -43,7 +43,13 @@ export const modbusApi = {
     const query = {};
     if (deviceId) query.device_id = deviceId;
     if (ip) { query.ip = ip; query.port = port; }
-    return request('/modbus/connect', { query, prefix: 'Connect failed' });
+    // Connecting includes a TCP handshake whose timeout is set server-side by
+    // CONNECTION_TIMEOUT (default 5 s, but admin-configurable) plus a couple of
+    // serial DB round-trips. The client timeout must comfortably exceed that
+    // ceiling, otherwise fetch aborts first and the user sees a meaningless
+    // "request timed out" instead of the backend's real diagnostic
+    // ("device may be powered off or unreachable at <ip>:<port>").
+    return request('/modbus/connect', { query, timeoutMs: 30000, prefix: 'Connect failed' });
   },
 
   // Every control/read is addressed to a specific device so it hits the right
@@ -76,6 +82,37 @@ export const modbusApi = {
   // Each row: { id, deviceId, type, time, severity: 'critical' | 'warning' }.
   getAlarms: (limit = 50) =>
     request('/alarms', { query: { limit }, prefix: 'Failed to fetch alarms' }),
+
+  // Live alarms (in-memory, from the fuel-polling loop, TTL 5 min).
+  // Returns one entry per device that currently has ≥1 active alarm:
+  //   { deviceId, deviceName, severity, alarmCount, alarms: [...], checkedAt }
+  getLiveAlarms: () =>
+    request('/alarms/live', { prefix: 'Failed to fetch live alarms' }),
+
+  // Full live detail for a single device.
+  getLiveAlarmDevice: (deviceId) =>
+    request(`/alarms/live/${deviceId}`, { prefix: 'Failed to fetch device alarm' }),
+
+  // Acknowledge (accept) a specific alarm by its action_id.
+  // The alarm is hidden from GET /api/alarms until the device fires a NEW alarm
+  // after the cooldown period (5 min by default).
+  acknowledgeAlarm: (actionId) =>
+    request(`/alarms/${actionId}/acknowledge`, { method: 'POST', prefix: 'Failed to acknowledge alarm' }),
+
+  // Device alarm snooze: GET/SET the snooze timestamp shared across all users.
+  // When one user accepts an alarm on a device, all users on that device
+  // should silence the sound until the snooze expires.
+  getDeviceSnooze: (deviceId) =>
+    request(`/devices/${deviceId}/snooze`, {
+      prefix: 'Failed to fetch device snooze',
+    }),
+
+  setDeviceSnooze: (deviceId, snoozeUntilMs) =>
+    request(`/devices/${deviceId}/snooze`, {
+      method: 'PUT',
+      body: { snoozeUntilMs },
+      prefix: 'Failed to set device snooze',
+    }),
 
   // Fuel consumption rate for one device over the last `windowMinutes`.
   // Returns { deviceId, ratePerHour, ... } or { deviceId, ratePerHour: null }.

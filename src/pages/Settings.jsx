@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { systemSettingsApi, defaultSettings } from '../api/settings.js';
 import { useSettings } from '../context/SettingsContext.jsx';
+import { useToast, useConfirm } from '../context/useFeedback.js';
+import Editable from '../components/pageedit/Editable.jsx';
 
 const TABS = [
   {
@@ -35,9 +38,9 @@ const TABS = [
   },
 ];
 
-function Field({ label, hint, children }) {
+function Field({ id, label, hint, children }) {
   return (
-    <div className="space-y-1.5">
+    <div id={id} className="space-y-1.5 scroll-mt-24">
       <label className="block text-sm font-medium text-gray-300">{label}</label>
       {children}
       {hint && <p className="text-xs text-gray-500">{hint}</p>}
@@ -105,12 +108,27 @@ function SectionCard({ title, icon, accent = 'border-white/5', children }) {
 
 export default function Settings() {
   const { settings: contextSettings, loading: contextLoading, updateSettings } = useSettings();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState('fuel');
+
+  // The Ctrl+K search deep-links to a specific setting via ?tab=<id> so the
+  // right tab is open when useScrollToHash scrolls to the field. Sync the active
+  // tab to the param during render (React's "adjust state on prop change"
+  // pattern) so a search launched while already on this page still switches tab.
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const validTab = TABS.some((t) => t.id === tabParam) ? tabParam : null;
+  const [activeTab, setActiveTab] = useState(validTab || 'fuel');
+  const [seenTabParam, setSeenTabParam] = useState(validTab);
+  if (validTab && validTab !== seenTabParam) {
+    setSeenTabParam(validTab);
+    setActiveTab(validTab);
+  }
 
   useEffect(() => {
     if (!contextLoading && contextSettings && Object.keys(contextSettings).length > 0) {
@@ -145,10 +163,16 @@ const [error, setError] = useState('');
     }
   };
 
-  const handleReset = () => {
-    if (confirm('Reset all settings to defaults?')) {
+  const handleReset = async () => {
+    if (await confirm({
+      title: 'Reset settings',
+      message: 'Reset all settings to defaults?',
+      confirmLabel: 'Reset',
+      danger: true,
+    })) {
       setSettings({ ...defaultSettings });
       setSaved(false);
+      toast.info('Settings reset to defaults — remember to save.');
     }
   };
 
@@ -165,8 +189,8 @@ const [error, setError] = useState('');
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
-          <p className="text-sm text-gray-400 mt-1">Configure alarms, connection and display options.</p>
+          <Editable id="settings.title" as="h1" className="text-2xl font-bold text-white tracking-tight">Settings</Editable>
+          <Editable id="settings.subtitle" as="p" className="text-sm text-gray-400 mt-1">Configure alarms, connection and display options.</Editable>
         </div>
 <div className="flex gap-2">
           <button
@@ -244,18 +268,33 @@ const [error, setError] = useState('');
             }
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="Low Tank Warning (%)" hint="Trigger warning when tank drops below this level">
+              <Field id="set-low-threshold" label="Low Tank Warning (%)" hint="Trigger warning when tank drops below this level">
                 <NumberInput
                   value={settings.LOW_TANK_THRESHOLD ?? 20}
                   min={0} max={100}
                   onChange={(e) => set('LOW_TANK_THRESHOLD', parseInt(e.target.value) || 0)}
                 />
               </Field>
-              <Field label="Critical Tank Level (%)" hint="Critical alert — immediate attention needed">
+              <Field id="set-critical-threshold" label="Critical Tank Level (%)" hint="Critical alert — immediate attention needed">
                 <NumberInput
                   value={settings.CRITICAL_TANK_THRESHOLD ?? 10}
                   min={0} max={100}
                   onChange={(e) => set('CRITICAL_TANK_THRESHOLD', parseInt(e.target.value) || 0)}
+                />
+              </Field>
+              <Field id="set-alarm-cooldown" label="Re-alarm Cooldown" hint="After accepting an alarm, how long before the same alarm fires again if the condition persists">
+                <SelectInput
+                  value={String(settings.ALARM_COOLDOWN_MINUTES ?? 60)}
+                  onChange={(e) => set('ALARM_COOLDOWN_MINUTES', parseInt(e.target.value))}
+                  options={[
+                    ['5',   '5 minutes'],
+                    ['15',  '15 minutes'],
+                    ['30',  '30 minutes'],
+                    ['60',  '1 hour'],
+                    ['120', '2 hours'],
+                    ['240', '4 hours'],
+                    ['480', '8 hours'],
+                  ]}
                 />
               </Field>
             </div>
@@ -272,14 +311,14 @@ const [error, setError] = useState('');
             }
           >
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              <Field label="Tank Capacity" hint="Maximum fuel tank capacity">
+              <Field id="set-tank-capacity" label="Tank Capacity" hint="Maximum fuel tank capacity">
                 <NumberInput
                   value={settings.TANK_CAPACITY_LITERS ?? 1000}
                   min={0} max={100000}
                   onChange={(e) => set('TANK_CAPACITY_LITERS', parseInt(e.target.value) || 0)}
                 />
               </Field>
-              <Field label="Display Unit">
+              <Field id="set-tank-unit" label="Display Unit">
                 <SelectInput
                   value={settings.TANK_CAPACITY_UNIT ?? 'liters'}
                   onChange={(e) => set('TANK_CAPACITY_UNIT', e.target.value)}
@@ -307,14 +346,14 @@ const [error, setError] = useState('');
             }
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="Consumption Rate Threshold (%/hr)" hint="Alert if consumption exceeds this rate">
+              <Field id="set-consumption-threshold" label="Consumption Rate Threshold (%/hr)" hint="Alert if consumption exceeds this rate">
                 <NumberInput
                   value={settings.CONSUMPTION_RATE_THRESHOLD ?? 5}
                   min={0} max={100} step={0.1}
                   onChange={(e) => set('CONSUMPTION_RATE_THRESHOLD', parseFloat(e.target.value) || 0)}
                 />
               </Field>
-              <div className="flex items-end pb-1">
+              <div id="set-fuel-alerts" className="flex items-end pb-1 scroll-mt-24">
                 <Toggle
                   checked={settings.FUEL_ALERTS_ENABLED ?? true}
                   onChange={(v) => set('FUEL_ALERTS_ENABLED', v)}
@@ -340,28 +379,28 @@ const [error, setError] = useState('');
             }
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="Default Port" hint="Standard Modbus TCP port is 502">
+              <Field id="set-default-port" label="Default Port" hint="Standard Modbus TCP port is 502">
                 <NumberInput
                   value={settings.DEFAULT_PORT ?? 502}
                   min={1} max={65535}
                   onChange={(e) => set('DEFAULT_PORT', parseInt(e.target.value) || 502)}
                 />
               </Field>
-              <Field label="Connection Timeout (ms)" hint="Time to wait before failing a connection attempt">
+              <Field id="set-connection-timeout" label="Connection Timeout (ms)" hint="Time to wait before failing a connection attempt">
                 <NumberInput
                   value={settings.CONNECTION_TIMEOUT ?? 5000}
                   min={1000} max={60000} step={1000}
                   onChange={(e) => set('CONNECTION_TIMEOUT', parseInt(e.target.value) || 5000)}
                 />
               </Field>
-              <Field label="Retry Attempts" hint="How many times to retry a failed connection">
+              <Field id="set-retry-attempts" label="Retry Attempts" hint="How many times to retry a failed connection">
                 <NumberInput
                   value={settings.RETRY_ATTEMPTS ?? 3}
                   min={0} max={10}
                   onChange={(e) => set('RETRY_ATTEMPTS', parseInt(e.target.value) || 3)}
                 />
               </Field>
-              <div className="flex items-end pb-1">
+              <div id="set-auto-reconnect" className="flex items-end pb-1 scroll-mt-24">
                 <Toggle
                   checked={settings.AUTO_RECONNECT ?? false}
                   onChange={(v) => set('AUTO_RECONNECT', v)}
@@ -387,12 +426,14 @@ const [error, setError] = useState('');
             }
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Toggle
-                checked={settings.SHOW_OFFLINE_DEVICES ?? true}
-                onChange={(v) => set('SHOW_OFFLINE_DEVICES', v)}
-                label="Show Offline Devices"
-              />
-              <Field label="Default Project View">
+              <div id="set-show-offline" className="flex items-center scroll-mt-24">
+                <Toggle
+                  checked={settings.SHOW_OFFLINE_DEVICES ?? true}
+                  onChange={(v) => set('SHOW_OFFLINE_DEVICES', v)}
+                  label="Show Offline Devices"
+                />
+              </div>
+              <Field id="set-default-view" label="Default Project View">
                 <SelectInput
                   value={settings.DEFAULT_PROJECT_VIEW ?? 'expanded'}
                   onChange={(e) => set('DEFAULT_PROJECT_VIEW', e.target.value)}

@@ -27,3 +27,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local AI tooling config
+.claude/
+
+# Embedded design repo (local only)
+src/components/styleseed/

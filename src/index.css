@@ -33,6 +33,32 @@ body {
 
 #root { min-height: 100vh; }
 
+/* ── Interaction affordances ──────────────────────────────────────────
+   Every actionable element gets a pointer cursor and — for keyboard
+   users only (:focus-visible) — a consistent, clearly visible ring.
+   Mouse clicks don't show the ring, so visuals stay clean. */
+button, [role="button"], a, summary, select, label[for] { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.7);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Reduce the iOS double-tap delay on controls. */
+button, a { touch-action: manipulation; }
+
+/* Numeric readouts (values, timestamps, counters) use the technical
+   mono face with tabular figures so digits don't jiggle as they update. */
+.data-value {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.tabular { font-variant-numeric: tabular-nums; }
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar          { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track    { background: transparent; }
@@ -71,6 +97,21 @@ body {
 .animate-fade-in   { animation: fade-in  0.35s ease-out both; }
 .animate-scale-in  { animation: scale-in 0.2s  ease-out both; }
 .animate-slide-up  { animation: slide-up 0.4s  ease-out both; }
+
+/* ── Ctrl+K search deep-link highlight ────────────────────────────────
+   Briefly rings the element a search result jumped to (see useScrollToHash).
+   Uses outline (not box-shadow) so it never clips inside overflow containers. */
+@keyframes search-target-flash {
+  0%   { outline-color: rgba(59, 130, 246, 0); }
+  15%  { outline-color: rgba(59, 130, 246, 0.9); }
+  100% { outline-color: rgba(59, 130, 246, 0); }
+}
+.search-target-flash {
+  outline: 2px solid rgba(59, 130, 246, 0);
+  outline-offset: 4px;
+  border-radius: 0.5rem;
+  animation: search-target-flash 1.6s ease-out;
+}
 
 /* ── Text reveal ──────────────────────────────────────────────────────
    A subtle rise + de-blur used for text. Applied globally to page
@@ -229,6 +270,71 @@ main :is(h1, h2) ~ :is(h1, h2) { animation-delay: 70ms; }
     background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.05) 50%, transparent 100%);
     animation: shimmer 1.5s infinite;
   }
+
+  /* ── Additions: reusable primitives so components stop hardcoding styles ──
+     Each mirrors a pattern already repeated inline across the app, giving one
+     place to tune it. All additive — existing usages are unaffected. */
+
+  /* Clickable card: same surface as .card plus a clear hover affordance. */
+  .card-interactive {
+    @apply rounded-2xl bg-[#1a1d27] border border-white/5
+      transition-colors hover:border-white/10 hover:bg-[#1e222e] cursor-pointer;
+  }
+
+  /* Compact metric readout used across live panels (fuel/battery/RPM tiles). */
+  .stat-tile {
+    @apply rounded-xl bg-[#0f1117] border border-white/5 px-3 py-2.5;
+  }
+
+  /* Icon-only control with a comfortable hit target (min 36px) + shared states.
+     Pair with an aria-label so it stays accessible without a visible text label. */
+  .btn-icon {
+    @apply inline-flex items-center justify-center w-9 h-9 rounded-lg
+      text-gray-400 hover:text-gray-100 hover:bg-white/10
+      transition-colors;
+  }
+
+  /* Small uppercase eyebrow used above grouped content. */
+  .eyebrow {
+    @apply text-[11px] uppercase tracking-widest font-semibold text-gray-500;
+  }
+
+  /* Error variant for .input-dark (compose: class="input-dark input-error"). */
+  .input-error {
+    @apply border-red-500/50 focus:ring-red-500/30 focus:border-red-500/60;
+  }
+}
+
+/* ── Visual page editor (admin Edit Mode) ─────────────────────────────
+   <Editable> elements get a dashed highlight while an admin is editing so
+   they're discoverable; the selected one gets a solid ring. Only present
+   in edit mode — normal rendering is untouched. */
+.pe-editable {
+  outline: 1px dashed rgba(59, 130, 246, 0.5);
+  outline-offset: 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: outline-color 0.15s, background-color 0.15s;
+}
+.pe-editable:hover {
+  outline-color: rgba(59, 130, 246, 0.9);
+  background-color: rgba(59, 130, 246, 0.06);
+}
+.pe-selected {
+  outline: 2px solid rgba(59, 130, 246, 1);
+  background-color: rgba(59, 130, 246, 0.08);
+}
+
+/* Global element editor: while an admin is in Edit Mode, any element inside the
+   page content becomes clickable, and whatever's under the cursor gets a dashed
+   highlight (the selected element's solid outline is injected per-selector by
+   GlobalEditLayer). */
+body.pe-editing [data-pe-root] * {
+  cursor: pointer;
+}
+body.pe-editing [data-pe-hover] {
+  outline: 1px dashed rgba(59, 130, 246, 0.6) !important;
+  outline-offset: 1px;
 }
 
 /* ── Utility extras ── */

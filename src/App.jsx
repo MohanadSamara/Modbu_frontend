@@ -15,8 +15,12 @@ import AuditLog from './pages/AuditLog.jsx';
 import Login from './pages/Login.jsx';
 import Roles from './pages/Roles.jsx';
 import Permissions from './pages/Permissions.jsx';
+import NotFound from './pages/NotFound.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { SettingsProvider } from './context/SettingsContext.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
+import { FeedbackProvider } from './context/FeedbackContext.jsx';
+import { PageEditProvider } from './context/PageEditContext.jsx';
 
 function App() {
   return (
@@ -26,8 +30,11 @@ function App() {
         v7_relativeSplatPath: true,
       }}
     >
+      <ErrorBoundary>
+      <FeedbackProvider>
       <AuthProvider>
         <SettingsProvider>
+          <PageEditProvider>
           <Routes>
             {/* Public route: login page */}
             <Route path="/login" element={<Login />} />
@@ -138,10 +145,15 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              {/* Catch-all: anything unmatched inside the app shell */}
+              <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
+          </PageEditProvider>
         </SettingsProvider>
       </AuthProvider>
+      </FeedbackProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

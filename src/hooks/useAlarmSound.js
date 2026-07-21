@@ -15,6 +15,79 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Global mute state
+// Alarm sound is played by independent useAlarmSound instances (one per
+// FuelGauge). A single shared flag + pub/sub lets a "Mute all" control silence
+// every instance at once, and persists the choice across reloads.
+// ─────────────────────────────────────────────────────────────────────────────
+const MUTE_KEY = 'modbus.alarmMuted';
+let _globalMuted = (() => {
+  try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; }
+})();
+const _muteListeners = new Set();
+
+export function getAlarmMuted() { return _globalMuted; }
+
+export function setAlarmMuted(value) {
+  const next = !!value;
+  if (next === _globalMuted) return;
+  _globalMuted = next;
+  try { localStorage.setItem(MUTE_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+  _muteListeners.forEach((fn) => { try { fn(next); } catch { /* ignore */ } });
+}
+
+// Subscribe to global mute changes; returns an unsubscribe fn.
+export function subscribeAlarmMuted(fn) {
+  _muteListeners.add(fn);
+  return () => { _muteListeners.delete(fn); };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared AudioContext + autoplay unlock
+// ONE context for the whole app: browsers cap the number of AudioContexts (~6),
+// so creating one per FuelGauge would throw once several gauges mount → the
+// error was swallowed and alarms went silent. And because browsers block audio
+// until the user has interacted, alarms fired from data/timers (never a click)
+// would leave the context 'suspended'. We resume it on the first interaction
+// anywhere in the app so later alarms are allowed to sound.
+// ─────────────────────────────────────────────────────────────────────────────
+let _audioCtx = null;
+
+function getAudioCtx() {
+  if (typeof window === 'undefined') return null;
+  if (!_audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try { _audioCtx = new AC(); } catch { return null; }
+  }
+  if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
+  return _audioCtx;
+}
+
+if (typeof window !== 'undefined') {
+  const unlock = () => {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    // A 1-sample silent buffer nudges stubborn browsers (iOS Safari) to 'running'.
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = ctx.createBuffer(1, 1, 22050);
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch { /* ignore */ }
+    if (ctx.state === 'running') {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('touchstart', unlock);
+    }
+  };
+  window.addEventListener('pointerdown', unlock);
+  window.addEventListener('keydown', unlock);
+  window.addEventListener('touchstart', unlock);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: add a WaveShaperNode for hard clipping / distortion
 // ─────────────────────────────────────────────────────────────────────────────
 function makeDistortion(ctx, amount = 200) {
@@ -193,24 +266,27 @@ const BURST_FN  = { critical: playCritical, warning: playWarning, rate: playRate
 const REPEAT_MS = { critical: 1200,          warning: 2500,        rate: 3000 };
 
 export function useAlarmSound() {
-  const ctxRef    = useRef(null);
   // Map of type → setInterval id. Lets multiple alarm types loop concurrently
   // (e.g. low-tank warning + high-consumption rate at the same time).
   const intervalsRef = useRef({});
-  const [muted, setMuted] = useState(false);
-  const mutedRef  = useRef(false);
+  // `muted` mirrors the shared global flag so a "Mute all" toggled anywhere
+  // silences (or restores) every alarm-sound instance at once.
+  const [muted, setMutedState] = useState(_globalMuted);
+  const mutedRef  = useRef(_globalMuted);
 
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
-  const getCtx = useCallback(() => {
-    if (!ctxRef.current) {
-      ctxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (ctxRef.current.state === 'suspended') {
-      ctxRef.current.resume().catch(() => {});
-    }
-    return ctxRef.current;
+  // Keep this instance in sync with the shared global mute flag.
+  useEffect(() => subscribeAlarmMuted(setMutedState), []);
+
+  // Writes the shared flag (broadcasts to every instance). Accepts a boolean or
+  // an updater fn, for drop-in compatibility with a useState setter.
+  const setMuted = useCallback((v) => {
+    setAlarmMuted(typeof v === 'function' ? v(_globalMuted) : v);
   }, []);
+
+  // One shared context for the whole app (see getAudioCtx above).
+  const getCtx = useCallback(() => getAudioCtx(), []);
 
   // Stop a single alarm type, or every type when called with no args.
   const stop = useCallback((type) => {
@@ -236,7 +312,7 @@ export function useAlarmSound() {
       if (mutedRef.current) return;
       try {
         BURST_FN[type](getCtx());
-      } catch (_) { /* AudioContext not supported */ }
+      } catch { /* AudioContext not supported */ }
     };
 
     fire();
@@ -258,7 +334,16 @@ export function useAlarmSound() {
     want.forEach((t) => trigger(t));
   }, [trigger]);
 
+  // Play a single burst once (no looping). Used by the "Test" control so the
+  // user can confirm audio works even when no alarm is active. Ignores the mute
+  // flag on purpose — it's a deliberate user action. Being a click, it also
+  // satisfies the browser's autoplay unlock.
+  const playOnce = useCallback((type = 'warning') => {
+    if (!BURST_FN[type]) return;
+    try { BURST_FN[type](getCtx()); } catch { /* AudioContext unavailable */ }
+  }, [getCtx]);
+
   useEffect(() => () => stop(), [stop]);
 
-  return { trigger, stop, setActive, muted, setMuted };
+  return { trigger, stop, setActive, playOnce, muted, setMuted };
 }

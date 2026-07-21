@@ -7,6 +7,14 @@
 
 import { request } from './http';
 
+// A brand whose live data comes from a cloud portal (Datakom Rainbow) instead of
+// Modbus/IP. Matches both the real spelling "Datakom" and the common "Datacom"
+// variant, so choosing either brand yields the cloud method (not IP). This is the
+// single source of truth for "is this the cloud brand?" across the Projects UI.
+export function isCloudBrand(name) {
+  return /data[ck]om/i.test(String(name ?? ''));
+}
+
 export const brandsApi = {
   list: () =>
     request('/brands', { prefix: 'Failed to fetch brands' }),

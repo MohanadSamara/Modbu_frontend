@@ -52,6 +52,11 @@ export const UI_ELEMENTS = [
   // ── Audit ────────────────────────────────────────────────────────────────
   { id: 'audit.view',        field: 'audit',    label: 'View audit log' },
   { id: 'audit.export',      field: 'audit',    label: 'Export audit log' },
+
+  // ── Datakom Rainbow ──────────────────────────────────────────────────────
+  { id: 'datakom.read',      field: 'datakom',  label: 'Live — Datakom Rainbow view' },
+  { id: 'datakom.link',      field: 'datakom',  label: 'Link device to Datakom Rainbow' },
+  { id: 'datakom.unlink',    field: 'datakom',  label: 'Unlink Datakom device' },
 ];
 
 // The list of fields, in display order (derived from the catalog).

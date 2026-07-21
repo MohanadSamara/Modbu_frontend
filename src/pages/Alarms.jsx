@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { modbusApi } from '../api/modbus.js';
 import { useAuth } from '../context/useAuth.js';
+import { SkeletonList } from '../components/Skeleton.jsx';
+import { defaultSettings } from '../api/settings.js';
 
 // Animate a number 0 → target (easeOutCubic). setState only fires inside the
 // rAF callback, never synchronously in the effect body.
@@ -72,23 +74,34 @@ export default function Alarms() {
   const [alarms, setAlarms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const pollRef = useRef(null);
 
   // Per-device consumption rate: [{ id, name, ratePerHour, error }].
   const [rates, setRates] = useState([]);
   const [ratesLoading, setRatesLoading] = useState(true);
 
+  // ── Live polling every 15 s ────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    modbusApi
-      .getAlarms(100)
-      .then((rows) => {
-        if (cancelled) return;
-        setAlarms(Array.isArray(rows) ? rows : []);
-        setError('');
-      })
-      .catch((err) => { if (!cancelled) setError(err.message || 'Failed to load alarms'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    const fetchAlarms = () => {
+      modbusApi
+        .getAlarms(100)
+        .then((rows) => {
+          if (cancelled) return;
+          setAlarms(Array.isArray(rows) ? rows : []);
+          setLastUpdated(new Date());
+          setError('');
+        })
+        .catch((err) => { if (!cancelled) setError(err.message || 'Failed to load alarms'); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    };
+    fetchAlarms();
+    pollRef.current = setInterval(fetchAlarms, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(pollRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -133,7 +146,12 @@ export default function Alarms() {
 
   const exportAlarms = () => {
     const header = ['Severity', 'Alarm', 'Device', 'Time'];
-    const rows = alarms.map((a) => [a.severity, alarmLabel(a.type), a.deviceId ?? '', formatTime(a.time)]);
+    const rows = alarms.map((a) => [
+      a.severity,
+      alarmLabel(a.type),
+      a.deviceName ?? a.deviceId ?? '',
+      formatTime(a.time),
+    ]);
     const csv = [header, ...rows]
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
       .join('\n');
@@ -143,6 +161,32 @@ export default function Alarms() {
     a.download = 'active-alarms.csv';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Optimistically remove the alarm, call the API, restore on failure.
+  const handleAccept = async (id) => {
+    setAlarms((prev) => prev.filter((a) => a.id !== id));
+    try {
+      // Find the device for this alarm (needed to set the shared snooze)
+      const alarm = alarms.find((a) => a.id === id);
+      const deviceId = alarm?.deviceId;
+
+      await modbusApi.acknowledgeAlarm(id);
+
+      // Set the snooze on the backend so ALL users on this device stop hearing it
+      if (deviceId) {
+        const cooldownMin = defaultSettings.ALARM_COOLDOWN_MINUTES || 60;
+        await modbusApi.setDeviceSnooze(deviceId, Date.now() + cooldownMin * 60_000).catch(() => {});
+      }
+
+      // Tell FuelGauge (if mounted) to stop the alarm sound immediately
+      window.dispatchEvent(new CustomEvent('alarm-accepted'));
+    } catch {
+      // Restore by re-fetching
+      modbusApi.getAlarms(100)
+        .then((rows) => setAlarms(Array.isArray(rows) ? rows : []))
+        .catch(() => {});
+    }
   };
 
   return (
@@ -159,18 +203,32 @@ export default function Alarms() {
         {/* Active Alarms */}
         <div className="rounded-2xl bg-[#1a1d27] border border-white/5 p-6 animate-slide-up delay-100">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-100">Active Alarms</h2>
-            <IconButton onClick={exportAlarms} title="Export alarms">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
-              </svg>
-            </IconButton>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-100">Active Alarms</h2>
+              {/* Live indicator */}
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {lastUpdated && (
+                <span className="text-xs text-gray-600 tabular-nums hidden sm:block">
+                  Updated {lastUpdated.toLocaleTimeString(undefined, { timeStyle: 'short' })}
+                </span>
+              )}
+              <IconButton onClick={exportAlarms} title="Export alarms">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                </svg>
+              </IconButton>
+            </div>
           </div>
 
           {error ? (
             <div className="py-14 text-center text-sm text-red-400">{error}</div>
           ) : loading ? (
-            <div className="py-14 text-center text-sm text-gray-500">Loading alarms…</div>
+            <SkeletonList rows={4} height="h-14" className="p-0 py-2" />
           ) : alarms.length === 0 ? (
             <AllClear text="All systems operating normally" />
           ) : (
@@ -178,18 +236,33 @@ export default function Alarms() {
               {alarms.map((a, i) => (
                 <div
                   key={a.id ?? i}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.02] border border-white/5 animate-fade-in"
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border animate-fade-in ${
+                    a.severity === 'critical'
+                      ? 'bg-red-500/5 border-red-500/15'
+                      : 'bg-amber-500/5 border-amber-500/10'
+                  }`}
                   style={{ animationDelay: `${Math.min(i * 40, 400)}ms` }}
                 >
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${a.severity === 'critical' ? 'bg-red-400' : 'bg-amber-400'}`} />
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    a.severity === 'critical' ? 'bg-red-400 animate-pulse' : 'bg-amber-400'
+                  }`} />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-gray-200 truncate">{alarmLabel(a.type)}</p>
-                    <p className="text-xs text-gray-500">Device {a.deviceId ?? '—'}</p>
+                    <p className="text-xs text-gray-500">{a.deviceName ?? `Device ${a.deviceId ?? '—'}`}</p>
                   </div>
-                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wide ${a.severity === 'critical' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 ${
+                    a.severity === 'critical' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'
+                  }`}>
                     {a.severity}
                   </span>
                   <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{formatTime(a.time)}</span>
+                  <button
+                    onClick={() => handleAccept(a.id)}
+                    title="Accept alarm"
+                    className="flex-shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-semibold border border-white/10 bg-white/5 text-gray-400 hover:bg-emerald-500/20 hover:text-emerald-400 hover:border-emerald-500/30 transition-colors"
+                  >
+                    Accept
+                  </button>
                 </div>
               ))}
             </div>
@@ -226,7 +299,9 @@ export default function Alarms() {
           </div>
 
           {ratesLoading ? (
-            <div className="py-10 text-center text-sm text-gray-500">Loading consumption rates…</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3" aria-hidden="true">
+              {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-20" />)}
+            </div>
           ) : rates.length === 0 ? (
             <div className="py-10 text-center text-sm text-gray-500">No devices to report</div>
           ) : (
