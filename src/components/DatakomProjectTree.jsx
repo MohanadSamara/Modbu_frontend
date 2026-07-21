@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { datakomApi } from '../api/datakom.js';
 import ProjectsSidebar from './ProjectsSidebar.jsx';
 import DatakomDeviceLive from './DatakomDeviceLive.jsx';
+import DatakomDeviceEdit from './DatakomDeviceEdit.jsx';
 import { buildSidebarProjects } from './datakomTreeMap.js';
 
 // The backend serves a continuously-pushed in-memory cache, so polling is cheap.
@@ -173,6 +174,13 @@ export default function DatakomProjectTree() {
               {selectedDevice.esn ? ` · esn ${selectedDevice.esn}` : ''}
               {selectedDevice.online ? ' · live' : ' · no reading yet'}
             </p>
+            {/* Edit affordance: rename the linked platform device, or link+edit
+                when the cloud device isn't in the platform yet (self-gates by
+                device.write / datakom.write). */}
+            <DatakomDeviceEdit
+              did={selectedDevice.did}
+              cloudName={selectedDevice.sid || `Device ${selectedDevice.did}`}
+            />
             <div className="max-w-md">
               <DatakomDeviceLive did={selectedDevice.did} />
             </div>
