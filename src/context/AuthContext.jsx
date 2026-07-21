@@ -172,8 +172,14 @@ return () => setAuthFailedHandler(null);
   }, []);
 
   useEffect(() => {
-    if (user) { loadFeatureOverrides(); loadElementMap(); }
-    else { setFeatureOverrides({}); setElementMap({}); }
+    if (!user) { setFeatureOverrides({}); setElementMap({}); return undefined; }
+    loadFeatureOverrides();
+    loadElementMap();
+    // Keep the DB-driven gating fresh: when an admin edits element/feature
+    // mappings on the Permissions page, other logged-in users pick the change
+    // up within a minute instead of at their next login.
+    const id = setInterval(() => { loadFeatureOverrides(); loadElementMap(); }, 60_000);
+    return () => clearInterval(id);
   }, [user, loadFeatureOverrides, loadElementMap]);
 
   // Should a UI feature be shown? Resolves the override (or catalog default) to
@@ -196,10 +202,13 @@ return () => setAuthFailedHandler(null);
     const coveringKeys = elementMap[elementId];
     if (!coveringKeys || coveringKeys.length === 0) return true; // not gated
     if (!user?.permissions) return false;
-    return coveringKeys.some((key) =>
-      levelOfKey(key) !== 'read' &&
-      user.permissions.some((p) => p.key === key && permScopeMatches(p, projectId))
-    );
+    return coveringKeys.some((key) => {
+      if (levelOfKey(key) === 'read') return false; // read = view only
+      // Same implication rule as hasPermission: holding a permission that
+      // implies the covering key counts as holding it.
+      const accepted = keysSatisfying(key);
+      return user.permissions.some((p) => accepted.includes(p.key) && permScopeMatches(p, projectId));
+    });
   }, [elementMap, user]);
 
   const refreshProfile = useCallback(() => _hydrateFromMe(), [_hydrateFromMe]);

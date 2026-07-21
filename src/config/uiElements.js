@@ -38,6 +38,9 @@ export const PERMISSION_IMPLICATIONS = {
   'user.write':       ['user.read'],
   'user.assign_role': ['user.read'],
   'datakom.write':    ['datakom.read', 'device.read'],
+  // Live Datakom data includes the fuel level — a datakom-only viewer must
+  // not see devices with empty gauges.
+  'datakom.read':     ['fuel.read'],
 };
 
 // All permission keys that satisfy a check for `key` (itself + stronger keys,
