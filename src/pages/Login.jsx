@@ -43,8 +43,14 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0f1117] p-6">
-      <motion.div {...spring.entrance} className="w-full max-w-md">
+    <div className="relative min-h-screen flex items-center justify-center bg-[#0f1117] p-6 overflow-hidden">
+      {/* Aurora backdrop — slow colour fields drifting behind the card. */}
+      <div aria-hidden="true" className="absolute inset-0">
+        <div className="aurora-blob w-[480px] h-[480px] -top-40 -left-24 bg-blue-600/60" />
+        <div className="aurora-blob w-[420px] h-[420px] -bottom-32 -right-16 bg-indigo-600/60" style={{ animationDelay: '-6s' }} />
+        <div className="aurora-blob w-[320px] h-[320px] top-1/3 left-1/2 bg-violet-600/40" style={{ animationDelay: '-12s' }} />
+      </div>
+      <motion.div {...spring.entrance} className="relative w-full max-w-md">
         {/* Logo */}
         <div className="flex flex-col items-center gap-3 mb-8">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
@@ -55,7 +61,7 @@ export default function Login() {
           </div>
           <div className="text-center">
             <h1 className="text-white text-2xl font-bold tracking-tight">
-              Modbus<span className="text-blue-400"> Hub</span>
+              Modbus<span className="gradient-text"> Hub</span>
             </h1>
             <p className="text-gray-500 text-sm mt-1">Sign in to continue</p>
           </div>

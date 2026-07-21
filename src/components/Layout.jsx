@@ -6,6 +6,7 @@ import EditToolbar from './pageedit/EditToolbar.jsx';
 import GlobalEditLayer from './pageedit/GlobalEditLayer.jsx';
 import { useScrollToHash } from '../hooks/useScrollToHash.js';
 import PageTransition from './anim/PageTransition.jsx';
+import { motion } from 'framer-motion';
 
 // Nav catalog lives in config/navItems.jsx so the sidebar and the Ctrl+K
 // command palette always offer the same permission-gated pages.
@@ -169,16 +170,26 @@ export default function Layout() {
                         to={to}
                         onClick={() => setSidebarOpen(false)}
                         aria-current={active ? 'page' : undefined}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200
+                        className={`relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors duration-200
                           ${active
-                            ? 'bg-blue-500/15 text-blue-400 shadow-sm'
+                            ? 'text-blue-400'
                             : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'
                           }`}
                       >
-                        <span className={active ? 'text-blue-400' : 'text-gray-500'}>{icon}</span>
-                        {shownLabel}
+                        {/* Shared-element pill: one highlight glides between nav
+                            items on route change instead of blinking on/off. */}
                         {active && (
-                          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" />
+                          <motion.span
+                            layoutId="nav-active-pill"
+                            className="absolute inset-0 rounded-xl bg-blue-500/15 shadow-sm"
+                            transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span className={`relative ${active ? 'text-blue-400' : 'text-gray-500'}`}>{icon}</span>
+                        <span className="relative">{shownLabel}</span>
+                        {active && (
+                          <span className="relative ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" />
                         )}
                       </Link>
                     );
@@ -212,7 +223,7 @@ export default function Layout() {
       {/* ── Main area ── */}
       <div className="flex-1 flex flex-col min-h-screen min-w-0">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 flex items-center justify-between h-16 px-6 bg-[#0f1117]/90 backdrop-blur border-b border-white/5">
+        <header className="glass sticky top-0 z-20 flex items-center justify-between h-16 px-6 border-b border-white/5">
           {/* Mobile menu toggle */}
           <button
             className="lg:hidden p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"

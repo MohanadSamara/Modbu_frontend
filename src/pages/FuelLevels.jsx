@@ -134,7 +134,7 @@ function DeviceGauge({ device, low, critical, reducedMotion, canMute, isMuted, o
   // Shown for every device with an id, IP (Modbus) or Live (Datakom Rainbow).
   const showMute = canMute && device.id != null;
   return (
-    <div className="relative rounded-2xl bg-[#1a1d27] border border-white/5 p-4 flex flex-col items-center">
+    <div className="card relative p-4 flex flex-col items-center">
       {showMute && (
         <button
           onClick={() => onToggleMute(device.id)}
@@ -688,7 +688,7 @@ export default function FuelLevels() {
       </div>
 
       {/* ── Live fleet-average trend (area chart) ── */}
-      <div className="rounded-2xl bg-[#1a1d27] border border-white/5 p-6 animate-slide-up delay-200">
+      <div className="card p-6 animate-slide-up delay-200">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-100">Fleet Average Trend</h2>
           <span className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -726,7 +726,7 @@ export default function FuelLevels() {
       </div>
 
       {/* ── Per-device list (data-table alternative for accessibility) ── */}
-      <div className="rounded-2xl bg-[#1a1d27] border border-white/5 p-6 animate-slide-up delay-300">
+      <div className="card p-6 animate-slide-up delay-300">
         <h2 className="text-lg font-semibold text-gray-100 mb-4">All Devices</h2>
         {rows.length === 0 && !loading ? (
           <div className="py-8 text-center text-sm text-gray-500">No devices found</div>
@@ -810,7 +810,7 @@ export default function FuelLevels() {
       </div>
 
       {/* ── Power BI analysis ── */}
-      <div className="rounded-2xl bg-[#1a1d27] border border-white/5 p-6 animate-slide-up delay-300">
+      <div className="card p-6 animate-slide-up delay-300">
         <div className="flex items-center gap-3 mb-4">
           <span className="w-10 h-10 rounded-xl bg-yellow-500/15 text-yellow-400 flex items-center justify-center">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

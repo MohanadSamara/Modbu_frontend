@@ -24,6 +24,9 @@
 // MUST stay in sync with the backend copy in Modbus/rbac-defaults.js — the
 // backend enforces the same expansion, this copy only keeps the UI honest.
 export const PERMISSION_IMPLICATIONS = {
+  // Viewing a device includes viewing its live data, whatever the transport —
+  // datakom.read is not a separate parallel permission to hand out.
+  'device.read':      ['datakom.read', 'fuel.read'],
   'device.write':     ['device.read'],
   'device.connect':   ['device.read'],
   'device.control':   ['device.read', 'fuel.read'],
@@ -37,13 +40,21 @@ export const PERMISSION_IMPLICATIONS = {
   'datakom.write':    ['datakom.read', 'device.read'],
 };
 
-// All permission keys that satisfy a check for `key` (itself + stronger keys).
+// All permission keys that satisfy a check for `key` (itself + stronger keys,
+// transitively: device.write → device.read → datakom.read).
 export function keysSatisfying(key) {
-  const out = [key];
-  for (const [strong, implied] of Object.entries(PERMISSION_IMPLICATIONS)) {
-    if (implied.includes(key)) out.push(strong);
+  const out = new Set([key]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [strong, implied] of Object.entries(PERMISSION_IMPLICATIONS)) {
+      if (!out.has(strong) && implied.some((k) => out.has(k))) {
+        out.add(strong);
+        grew = true;
+      }
+    }
   }
-  return out;
+  return [...out];
 }
 
 export const UI_ELEMENTS = [

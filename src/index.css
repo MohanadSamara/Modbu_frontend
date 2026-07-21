@@ -24,7 +24,14 @@ html { color-scheme: dark; }
 
 body {
   margin: 0;
-  background: var(--color-bg);
+  /* Ambient depth: two faint colour fields breathing behind the flat base so
+     the app reads as a lit space instead of a flat sheet. Fixed attachment
+     keeps the glow anchored while content scrolls. */
+  background:
+    radial-gradient(900px 500px at 12% -10%, rgba(59, 130, 246, 0.09), transparent 60%),
+    radial-gradient(800px 600px at 105% 110%, rgba(99, 102, 241, 0.07), transparent 60%),
+    var(--color-bg);
+  background-attachment: fixed;
   color: var(--color-text);
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -92,6 +99,25 @@ button, a { touch-action: manipulation; }
 @keyframes shimmer {
   0%   { transform: translateX(-100%) skewX(-12deg); }
   100% { transform: translateX(200%)  skewX(-12deg); }
+}
+
+/* Aurora blobs (login backdrop) — slow drifting colour fields, GPU-only
+   transforms. Hidden entirely under reduced motion. */
+@keyframes aurora-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(60px, -40px) scale(1.15); }
+  66%      { transform: translate(-40px, 30px) scale(0.95); }
+}
+.aurora-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.35;
+  animation: aurora-drift 18s ease-in-out infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .aurora-blob { animation: none; }
 }
 
 .animate-fade-in   { animation: fade-in  0.35s ease-out both; }
@@ -165,8 +191,39 @@ main :is(h1, h2) ~ :is(h1, h2) { animation-delay: 70ms; }
 @layer components {
 
   /* Cards */
+  /* Elevated surface: a lit top edge, real depth shadow, and a quiet blue
+     halo on hover. One class carries the whole product's sense of quality. */
   .card {
-    @apply rounded-2xl bg-[#1a1d27] border border-white/5;
+    @apply rounded-2xl border border-white/5;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 42%),
+      #1a1d27;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 12px 32px -16px rgba(0, 0, 0, 0.55);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+  .card:hover {
+    border-color: rgba(59, 130, 246, 0.16);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 18px 44px -16px rgba(0, 0, 0, 0.6),
+      0 0 32px -12px rgba(59, 130, 246, 0.25);
+  }
+
+  /* Frosted layer for bars/overlays that float above content. */
+  .glass {
+    background: rgba(15, 17, 23, 0.72);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  }
+
+  /* Headline accent — blue→indigo ink for brand moments. */
+  .gradient-text {
+    background: linear-gradient(92deg, #60a5fa 0%, #818cf8 55%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 
   /* Inputs (dark) */
