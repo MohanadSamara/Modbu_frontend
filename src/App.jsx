@@ -77,10 +77,12 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              {/* fuel.read is the page's own permission; device.read holders
+                  pass too via the implication chain. */}
               <Route
                 path="fuel"
                 element={
-                  <ProtectedRoute requiredPermission="device.read">
+                  <ProtectedRoute requiredPermission="fuel.read">
                     <FuelLevels />
                   </ProtectedRoute>
                 }

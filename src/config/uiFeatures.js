@@ -16,6 +16,7 @@
 export const UI_FEATURES = [
   // Navigation
   { id: 'nav.projects',    label: 'Projects / Devices link', group: 'Navigation',     defaultPermission: ['project.read', 'device.read'] },
+  { id: 'nav.fuel',        label: 'Fuel Levels link',        group: 'Navigation',     defaultPermission: 'fuel.read' },
   { id: 'nav.brands',      label: 'Brands link',             group: 'Navigation',     defaultPermission: 'device.read' },
   { id: 'nav.events',      label: 'Events link',             group: 'Navigation',     defaultPermission: 'alarm.read' },
   { id: 'nav.settings',    label: 'Settings link',           group: 'Navigation',     defaultPermission: 'settings.read' },

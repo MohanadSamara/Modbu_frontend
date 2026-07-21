@@ -32,6 +32,17 @@ export const NAV_ITEMS = [
     ),
   },
   {
+    to: '/fuel',
+    label: 'Fuel Levels',
+    // Reachable with fuel.read alone — a fuel-only viewer's home page.
+    feature: 'nav.fuel',
+    icon: (
+      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 2c-4 4.5-6 8-6 11a6 6 0 0012 0c0-3-2-6.5-6-11z" />
+      </svg>
+    ),
+  },
+  {
     to: '/brands',
     label: 'Brands',
     feature: 'nav.brands',
