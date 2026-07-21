@@ -295,6 +295,27 @@ export default function Projects() {
     try { setDatakomNodeContainers(await datakomApi.nodeContainers() || {}); } catch { /* keep last */ }
   }, [canReadDatakom]);
   useEffect(() => { refreshDatakomNodeContainers(); }, [refreshDatakomNodeContainers]);
+
+  // Distinct folder names that currently exist (from node assignments + empty
+  // folder markers) — offered in the "move to folder" dropdown on each node.
+  const datakomFolderOptions = useMemo(
+    () => [...new Set(Object.values(datakomNodeContainers).map((v) => String(v).trim()).filter(Boolean))].sort(),
+    [datakomNodeContainers]
+  );
+
+  // Create an empty folder. Stored as a marker row (node id '__folder__:<name>')
+  // so the folder shows up even before any node is moved into it.
+  const handleCreateDatakomFolder = useCallback(async (name) => {
+    const clean = String(name ?? '').trim();
+    if (!clean) return { ok: false, error: 'Folder name required' };
+    try {
+      await datakomApi.setNodeContainer(`__folder__:${clean}`, clean);
+      setDatakomNodeContainers((prev) => ({ ...prev, [`__folder__:${clean}`]: clean }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message || 'Failed to create folder' };
+    }
+  }, []);
   useEffect(() => {
     if (!canReadDatakom || flatMode) { setDatakomTree(null); return undefined; }
     let cancelled = false;
@@ -1641,6 +1662,10 @@ const [locationInputs, setLocationInputs] = useState({});
           // Datakom nodes (read-only cloud) can still be renamed locally by
           // datakom.write holders; the sidebar shows a pencil on those nodes.
           allowLocationRename
+          // Datakom folders: existing folder names for the move dropdown, and
+          // the create-folder handler behind the "New folder" button.
+          datakomFolderOptions={datakomFolderOptions}
+          onCreateDatakomFolder={handleCreateDatakomFolder}
           shouldShowDevice={sidebarShouldShowDevice}
           projectName={projectName}
           setProjectName={setProjectName}

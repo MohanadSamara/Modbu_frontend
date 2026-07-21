@@ -119,18 +119,34 @@ export default function ProjectsSidebar({
   allowLocationRename = false,
   // Candidate containers for the project edit form ([{ backendId, name }]).
   projectContainerOptions = [],
+  // Datakom folders: existing names for the node "move to folder" dropdown, and
+  // the handler behind the header "New folder" button.
+  datakomFolderOptions = [],
+  onCreateDatakomFolder = null,
   title = 'Projects',
   // Cascade helpers/handlers for building DB entities from the Datakom Rainbow
   // tree. Null when the page isn't offering the integration.
   datakom = null,
 }) {
-  const { canFeature } = useAuth();
+  const { canFeature, hasPermission } = useAuth();
   const canWriteProject = !readOnly && canFeature('button.project.write');
+  // Datakom folder management is available when the page enabled it and the
+  // user can write Datakom (same gate as node rename).
+  const canManageDatakomFolders = allowLocationRename && !!onCreateDatakomFolder && hasPermission('datakom.write');
 
   // The "+" add button opens a menu: create the typed name and/or import an
   // existing Datakom Rainbow project. Closes on outside click.
   const addMenuRef = useRef(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  // "New folder" inline input (Datakom grouping).
+  const [folderInput, setFolderInput] = useState('');
+  const [folderOpen, setFolderOpen] = useState(false);
+  const [folderErr, setFolderErr] = useState('');
+  const submitFolder = async () => {
+    const res = await onCreateDatakomFolder?.(folderInput);
+    if (res?.ok) { setFolderInput(''); setFolderOpen(false); setFolderErr(''); }
+    else setFolderErr(res?.error || 'Failed');
+  };
   useEffect(() => {
     if (!addMenuOpen) return undefined;
     const onDoc = (e) => {
@@ -151,8 +167,45 @@ export default function ProjectsSidebar({
           </svg>
         </div>
         <span className="text-sm font-semibold text-gray-200">{title}</span>
-        <span className="ml-auto text-xs text-gray-600 font-mono">{projects.length}</span>
+        {canManageDatakomFolders && (
+          <button
+            type="button"
+            onClick={() => { setFolderOpen((v) => !v); setFolderErr(''); }}
+            title="Create a folder to group Datakom nodes"
+            className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-white/5 border border-white/10 text-gray-300 hover:bg-white/10 transition-colors"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11v4m2-2h-4" />
+            </svg>
+            New folder
+          </button>
+        )}
+        <span className={`text-xs text-gray-600 font-mono ${canManageDatakomFolders ? 'ml-2' : 'ml-auto'}`}>{projects.length}</span>
       </div>
+
+      {/* New folder inline input (Datakom grouping) */}
+      {canManageDatakomFolders && folderOpen && (
+        <div className="px-3 py-3 border-b border-white/5 flex-shrink-0">
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={folderInput}
+              onChange={(e) => setFolderInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitFolder(); } if (e.key === 'Escape') setFolderOpen(false); }}
+              placeholder="Folder name…"
+              autoFocus
+              className="flex-1 px-3 py-2 rounded-xl bg-[#0f1117] border border-white/10 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/40 transition-colors"
+            />
+            <button type="button" onClick={submitFolder}
+              className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-500 transition-colors">
+              Create
+            </button>
+          </div>
+          {folderErr && <p className="text-[10px] text-red-400 mt-1">{folderErr}</p>}
+          <p className="text-[10px] text-gray-600 mt-1">Then open a node's edit (pencil) and pick this folder to move it in.</p>
+        </div>
+      )}
 
       {/* New project input — only for users who can create projects */}
       {canWriteProject && (
@@ -261,6 +314,7 @@ export default function ProjectsSidebar({
                 readOnly={readOnly}
                 allowLocationRename={allowLocationRename}
                 projectContainerOptions={projectContainerOptions}
+                datakomFolderOptions={datakomFolderOptions}
                 datakom={datakom}
               />
             ))}
@@ -290,6 +344,7 @@ function ProjectNode({
   readOnly = false,
   allowLocationRename = false,
   projectContainerOptions = [],
+  datakomFolderOptions = [],
   datakom = null,
 }) {
   const { canFeature, canUseElement, hasPermission } = useAuth();
@@ -325,6 +380,7 @@ function ProjectNode({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(project.name);
   const [parentDraft, setParentDraft] = useState(project.parentId ?? '');
+  const [dkContainerDraft, setDkContainerDraft] = useState(project.container ?? '');
   const [editErr, setEditErr] = useState('');
   // Add-location "+" menu (only when this project has Datakom child options).
   const [locMenuOpen, setLocMenuOpen] = useState(false);
@@ -334,11 +390,23 @@ function ProjectNode({
   // container choices (backend also rejects cycles).
   const showContainerSelect = !isDatakomProject && canWriteProject;
   const containerChoices = projectContainerOptions.filter((o) => o.backendId !== project.backendId);
+  // A Datakom node-project (not a container folder) can be dropped into a local
+  // container folder by typing its name — a free-text field, so a new folder is
+  // created on the fly and matching names group together.
+  const canWriteDatakom = allowLocationRename && hasPermission('datakom.write');
+  const showDkContainerInput = isDatakomProject && !project.datakomContainer && canWriteDatakom;
 
-  const startEdit = () => { setDraft(project.name); setParentDraft(project.parentId ?? ''); setEditErr(''); setEditing(true); };
+  const startEdit = () => {
+    setDraft(project.name);
+    setParentDraft(project.parentId ?? '');
+    setDkContainerDraft(project.container ?? '');
+    setEditErr('');
+    setEditing(true);
+  };
   const saveEdit = async () => {
     const payload = { name: draft };
     if (showContainerSelect) payload.parentId = parentDraft === '' ? null : Number(parentDraft);
+    if (showDkContainerInput) payload.datakomContainer = dkContainerDraft;
     const res = await onUpdateProject(project.id, payload);
     if (res?.ok) setEditing(false); else setEditErr(res?.error || 'Update failed');
   };
@@ -365,6 +433,42 @@ function ProjectNode({
               <option value="" className="bg-[#0f1117]">— Top level (no container) —</option>
               {containerChoices.map((o) => (
                 <option key={o.backendId} value={o.backendId} className="bg-[#0f1117]">Inside: {o.name}</option>
+              ))}
+            </select>
+            <div className="flex gap-1.5">
+              <button onClick={saveEdit}
+                className="flex-1 py-1 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-colors">
+                Save
+              </button>
+              <button onClick={() => setEditing(false)}
+                className="px-2 py-1 rounded-lg bg-white/10 text-gray-300 text-xs hover:bg-white/20 transition-colors">
+                Cancel
+              </button>
+            </div>
+            {editErr && <p className="text-[10px] text-red-400">{editErr}</p>}
+          </div>
+        ) : showDkContainerInput ? (
+          <div className="rounded-xl bg-[#0f1117] border border-white/10 p-2 space-y-1.5">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveEdit(); } if (e.key === 'Escape') setEditing(false); }}
+              className={treeInput}
+              autoFocus
+              placeholder="Node name"
+            />
+            {/* Move into a folder. Dropdown of existing folders (created with the
+                header "New folder" button); "— Top level —" removes it from any
+                folder. The current value is kept even if it isn't in the list. */}
+            <select
+              value={dkContainerDraft}
+              onChange={(e) => setDkContainerDraft(e.target.value)}
+              className={`${treeInput} cursor-pointer`}
+              title="Move this node into a folder"
+            >
+              <option value="" className="bg-[#0f1117]">— Top level (no folder) —</option>
+              {[...new Set([...(dkContainerDraft ? [dkContainerDraft] : []), ...datakomFolderOptions])].map((f) => (
+                <option key={f} value={f} className="bg-[#0f1117]">Move into: {f}</option>
               ))}
             </select>
             <div className="flex gap-1.5">

@@ -75,26 +75,29 @@ export function buildSidebarProjects(tree, overrides = {}, containers = {}) {
   // Group node-projects that carry a container assignment under synthetic
   // container folders; the rest stay top-level. A container renders its members
   // as childProjects (reusing the sidebar's nested-project rendering).
+  const makeContainer = (cname) => ({
+    id: `dk-container-${cname}`,
+    name: cname,
+    readOnly: true,
+    datakomProject: true,
+    datakomContainer: true,
+    locations: [],
+    devices: [],
+    childProjects: [],
+  });
   const containerByName = new Map();
+  // Register EVERY folder name that exists (including empty folders created via
+  // the "New folder" button, stored as marker rows) so empty folders still show.
+  for (const v of Object.values(containers)) {
+    const cname = (v || '').trim();
+    if (cname && !containerByName.has(cname)) containerByName.set(cname, makeContainer(cname));
+  }
   const topLevel = [];
   for (const np of nodeProjects) {
     const cname = (np.container || '').trim();
     if (cname) {
-      let cont = containerByName.get(cname);
-      if (!cont) {
-        cont = {
-          id: `dk-container-${cname}`,
-          name: cname,
-          readOnly: true,
-          datakomProject: true,
-          datakomContainer: true,
-          locations: [],
-          devices: [],
-          childProjects: [],
-        };
-        containerByName.set(cname, cont);
-      }
-      cont.childProjects.push(np);
+      if (!containerByName.has(cname)) containerByName.set(cname, makeContainer(cname));
+      containerByName.get(cname).childProjects.push(np);
     } else {
       topLevel.push(np);
     }
