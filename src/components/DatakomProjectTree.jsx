@@ -29,10 +29,10 @@ export default function DatakomProjectTree() {
   const [loading, setLoading] = useState(true);
 
   // Tree navigation state — kept local so this view is fully independent of the
-  // DB project tree. The single synthetic project starts expanded.
-  const [expandedProjects, setExpandedProjects] = useState({ 'dk-root': true });
+  // DB project tree. Each Datakom root node is now its own top-level project.
+  const [expandedProjects, setExpandedProjects] = useState({});
   const [expandedLocations, setExpandedLocations] = useState({});
-  const [activeProjectId, setActiveProjectId] = useState('dk-root');
+  const [activeProjectId, setActiveProjectId] = useState(null);
   const [activeLocationId, setActiveLocationId] = useState(null);
   const [activeDeviceId, setActiveDeviceId] = useState(null);
 

@@ -296,6 +296,11 @@ function ProjectNode({
   // project's own Datakom node).
   const dkLocationOptions = !effReadOnly ? (datakom?.allNodes ?? []) : [];
   const canWriteProject = !effReadOnly && canFeature('button.project.write');
+  const canWriteDevice  = !effReadOnly && canFeature('button.device.write');
+  // Devices that hang directly off a project (Datakom nodes promoted to
+  // projects carry their own devices; normal DB projects have none here).
+  const directDevices = (project.devices ?? []).filter(shouldShowDevice);
+  const itemCount = project.locations.length + (project.devices?.length ?? 0);
   // The Datakom Rainbow wrapper (id 'dk-…') is read-only cloud data, but its
   // DISPLAY name can be overridden locally by datakom.write holders — same
   // mechanism as the nodes below it.
@@ -344,7 +349,7 @@ function ProjectNode({
               d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
           <span className="truncate text-sm font-semibold">{project.name}</span>
-          <span className="ml-1 text-[10px] text-gray-600 flex-shrink-0">{project.locations.length}</span>
+          <span className="ml-1 text-[10px] text-gray-600 flex-shrink-0">{itemCount}</span>
         </button>
         {canEditProject && (
           <button
@@ -416,9 +421,7 @@ function ProjectNode({
             </div>
           )}
 
-          {project.locations.length === 0 ? (
-            <p className="text-xs text-gray-600 px-1 pb-2">No locations yet.</p>
-          ) : (
+          {project.locations.length > 0 && (
             <ul className="space-y-0.5">
               {project.locations.map((loc) => (
                 <LocationNode
@@ -443,6 +446,34 @@ function ProjectNode({
                 />
               ))}
             </ul>
+          )}
+
+          {/* Devices that hang directly off the project (Datakom node promoted
+              to a project keeps its own devices here — normal DB projects have
+              none, so this renders nothing for them). */}
+          {directDevices.length > 0 && (
+            <ul className="space-y-0.5 pt-0.5">
+              {directDevices.map((device) => (
+                <DeviceNode
+                  key={device.id}
+                  project={project} location={{ id: project.id, name: project.name }} device={device}
+                  isActive={activeDeviceId === device.id}
+                  isConn={connectedDeviceIds.has(device.id)}
+                  setActiveProjectId={setActiveProjectId} setActiveLocationId={setActiveLocationId} setActiveDeviceId={setActiveDeviceId}
+                  onDeleteDevice={onDeleteDevice} onUpdateDevice={onUpdateDevice}
+                  canWriteDevice={canWriteDevice}
+                  brands={brands}
+                  alarms={alarmsMap[String(device.backendId)] ?? []}
+                  onAcceptAlarm={onAcceptAlarm}
+                />
+              ))}
+            </ul>
+          )}
+
+          {project.locations.length === 0 && directDevices.length === 0 && (
+            <p className="text-xs text-gray-600 px-1 pb-2">
+              {project.datakomProject ? 'No devices.' : 'No locations yet.'}
+            </p>
           )}
         </div>
       )}

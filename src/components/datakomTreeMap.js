@@ -36,26 +36,38 @@ export function buildSidebarProjects(tree, overrides = {}) {
     };
   };
 
-  const locations = (tree.roots || []).map(mapNode);
+  // Each root Datakom node becomes its OWN top-level project (no "Datakom
+  // Rainbow" wrapper). A node's sub-nodes render as locations; its direct
+  // devices render right under the project. readOnly so the merged sidebar
+  // shows no create/delete controls; names are locally overridable (keyed by
+  // the node id, same as the rename endpoint expects).
+  const projects = (tree.roots || []).map((node) => {
+    const id = `dk-node-${node.id}`;
+    const cloudName = node.name || `Node ${node.id}`;
+    return {
+      id,
+      name: overrides[id] || cloudName,
+      cloudName,
+      readOnly: true,
+      datakomProject: true,
+      locations: (node.children || []).map(mapNode),
+      devices: (node.devices || []).map(mapDevice),
+    };
+  });
+
+  // Devices with no Datakom node → their own project so they're still reachable.
   if (tree.ungrouped && tree.ungrouped.length) {
-    locations.push({
-      id: 'dk-node-ungrouped',
-      name: overrides['dk-node-ungrouped'] || 'Ungrouped',
+    const id = 'dk-node-ungrouped';
+    projects.push({
+      id,
+      name: overrides[id] || 'Ungrouped',
       cloudName: 'Ungrouped',
-      children: [],
+      readOnly: true,
+      datakomProject: true,
+      locations: [],
       devices: tree.ungrouped.map(mapDevice),
     });
   }
 
-  // readOnly so it can be merged into the editable Projects sidebar without
-  // exposing create/rename/delete controls on cloud-sourced nodes. The wrapper
-  // name itself is locally overridable too (keyed 'dk-root').
-  const projects = [{
-    id: 'dk-root',
-    name: overrides['dk-root'] || 'Datakom Rainbow',
-    cloudName: 'Datakom Rainbow',
-    readOnly: true,
-    locations,
-  }];
   return { projects, deviceIndex, onlineIds };
 }

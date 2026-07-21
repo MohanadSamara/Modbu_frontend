@@ -671,7 +671,8 @@ const [locationInputs, setLocationInputs] = useState({});
     canReadDatakom && (
       (activeDeviceId != null && String(activeDeviceId).startsWith('dk-')) ||
       (activeLocationId != null && String(activeLocationId).startsWith('dk-')) ||
-      activeProjectId === 'dk-root'
+      // Each Datakom root node is now its own top-level project (id 'dk-node-…').
+      (activeProjectId != null && String(activeProjectId).startsWith('dk-'))
     );
   const selectedDatakomDevice = activeDeviceId ? datakomIndex.get(activeDeviceId) ?? null : null;
   const selectedDatakomNodeName = useMemo(() => {
@@ -696,8 +697,11 @@ const [locationInputs, setLocationInputs] = useState({});
   //              devices become device options (auto-linking datakom_did).
   // The mapping is also persisted by backend id so it survives a reload (the
   // tree re-hydrates from the DB, which has no such column).
+  // Each Datakom root node is now its own project; re-expose them in the
+  // { id, name, children } shape the "link to Datakom" cascade menus expect
+  // (identical to the old wrapper.locations, so downstream linking is unchanged).
   const datakomRootNodes = useMemo(
-    () => (datakomProjects[0]?.locations ?? []),
+    () => datakomProjects.map((p) => ({ id: p.id, name: p.name, children: p.locations })),
     [datakomProjects]
   );
   // Every Datakom device (flat, sorted) — so a NEW device in any location can be
