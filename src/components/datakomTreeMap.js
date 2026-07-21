@@ -13,7 +13,9 @@
 // `overrides` ({ [nodeId]: customName }) lets a locally-stored name replace the
 // cloud node name (see datakom_node_names on the backend). The `cloudName` is
 // kept on each mapped node so the rename UI can show what the portal calls it.
-export function buildSidebarProjects(tree, overrides = {}) {
+// `containers` ({ [nodeId]: containerName }) groups root node-projects under
+// synthetic local container folders (datakom_node_containers on the backend).
+export function buildSidebarProjects(tree, overrides = {}, containers = {}) {
   const deviceIndex = new Map(); // leaf id → device summary (has .did)
   const onlineIds = new Set();   // leaf ids with a live reading
 
@@ -36,12 +38,11 @@ export function buildSidebarProjects(tree, overrides = {}) {
     };
   };
 
-  // Each root Datakom node becomes its OWN top-level project (no "Datakom
-  // Rainbow" wrapper). A node's sub-nodes render as locations; its direct
-  // devices render right under the project. readOnly so the merged sidebar
-  // shows no create/delete controls; names are locally overridable (keyed by
-  // the node id, same as the rename endpoint expects).
-  const projects = (tree.roots || []).map((node) => {
+  // Build one project object per root Datakom node (sub-nodes → locations,
+  // direct devices → under the project). readOnly + datakomProject so the
+  // merged sidebar shows no create/delete controls; names are locally
+  // overridable (keyed by the node id).
+  const buildNodeProject = (node) => {
     const id = `dk-node-${node.id}`;
     const cloudName = node.name || `Node ${node.id}`;
     return {
@@ -50,24 +51,55 @@ export function buildSidebarProjects(tree, overrides = {}) {
       cloudName,
       readOnly: true,
       datakomProject: true,
+      container: containers[id] || null, // which local folder it belongs to
       locations: (node.children || []).map(mapNode),
       devices: (node.devices || []).map(mapDevice),
     };
-  });
+  };
 
-  // Devices with no Datakom node → their own project so they're still reachable.
+  const nodeProjects = (tree.roots || []).map(buildNodeProject);
   if (tree.ungrouped && tree.ungrouped.length) {
     const id = 'dk-node-ungrouped';
-    projects.push({
+    nodeProjects.push({
       id,
       name: overrides[id] || 'Ungrouped',
       cloudName: 'Ungrouped',
       readOnly: true,
       datakomProject: true,
+      container: containers[id] || null,
       locations: [],
       devices: tree.ungrouped.map(mapDevice),
     });
   }
 
+  // Group node-projects that carry a container assignment under synthetic
+  // container folders; the rest stay top-level. A container renders its members
+  // as childProjects (reusing the sidebar's nested-project rendering).
+  const containerByName = new Map();
+  const topLevel = [];
+  for (const np of nodeProjects) {
+    const cname = (np.container || '').trim();
+    if (cname) {
+      let cont = containerByName.get(cname);
+      if (!cont) {
+        cont = {
+          id: `dk-container-${cname}`,
+          name: cname,
+          readOnly: true,
+          datakomProject: true,
+          datakomContainer: true,
+          locations: [],
+          devices: [],
+          childProjects: [],
+        };
+        containerByName.set(cname, cont);
+      }
+      cont.childProjects.push(np);
+    } else {
+      topLevel.push(np);
+    }
+  }
+
+  const projects = [...containerByName.values(), ...topLevel];
   return { projects, deviceIndex, onlineIds };
 }

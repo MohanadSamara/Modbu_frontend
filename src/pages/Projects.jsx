@@ -288,6 +288,13 @@ export default function Projects() {
     try { setDatakomNodeNames(await datakomApi.nodeNames() || {}); } catch { /* keep last */ }
   }, [canReadDatakom]);
   useEffect(() => { refreshDatakomNodeNames(); }, [refreshDatakomNodeNames]);
+  // Local grouping of Datakom nodes into container folders ({ nodeId: name }).
+  const [datakomNodeContainers, setDatakomNodeContainers] = useState({});
+  const refreshDatakomNodeContainers = useCallback(async () => {
+    if (!canReadDatakom) return;
+    try { setDatakomNodeContainers(await datakomApi.nodeContainers() || {}); } catch { /* keep last */ }
+  }, [canReadDatakom]);
+  useEffect(() => { refreshDatakomNodeContainers(); }, [refreshDatakomNodeContainers]);
   useEffect(() => {
     if (!canReadDatakom || flatMode) { setDatakomTree(null); return undefined; }
     let cancelled = false;
@@ -315,9 +322,9 @@ export default function Projects() {
   // and the live status dots.
   const { projects: datakomProjects, deviceIndex: datakomIndex, onlineIds: datakomOnline } = useMemo(
     () => (datakomTree
-      ? buildSidebarProjects(datakomTree, datakomNodeNames)
+      ? buildSidebarProjects(datakomTree, datakomNodeNames, datakomNodeContainers)
       : { projects: [], deviceIndex: new Map(), onlineIds: new Set() }),
-    [datakomTree, datakomNodeNames]
+    [datakomTree, datakomNodeNames, datakomNodeContainers]
   );
 
   // ── Live alarms map: backendDeviceId (string) → alarm[] ─────────────────
@@ -714,7 +721,12 @@ const [locationInputs, setLocationInputs] = useState({});
         if (found) return;
       }
     };
-    for (const p of datakomProjects) walk(p.locations);
+    // Walk both top-level node-projects and those nested inside container folders.
+    const walkProject = (p) => {
+      walk(p.locations);
+      for (const c of p.childProjects ?? []) walkProject(c);
+    };
+    for (const p of datakomProjects) walkProject(p);
     return found;
   }, [activeLocationId, datakomProjects]);
 
@@ -726,13 +738,20 @@ const [locationInputs, setLocationInputs] = useState({});
   //              devices become device options (auto-linking datakom_did).
   // The mapping is also persisted by backend id so it survives a reload (the
   // tree re-hydrates from the DB, which has no such column).
-  // Each Datakom root node is now its own project; re-expose them in the
-  // { id, name, children } shape the "link to Datakom" cascade menus expect
-  // (identical to the old wrapper.locations, so downstream linking is unchanged).
-  const datakomRootNodes = useMemo(
-    () => datakomProjects.map((p) => ({ id: p.id, name: p.name, children: p.locations })),
-    [datakomProjects]
-  );
+  // The actual Datakom node-projects in the { id, name, children } shape the
+  // "link to Datakom" cascade menus expect. Container folders are unwrapped so
+  // the real nodes (not the folders) remain the link targets.
+  const datakomRootNodes = useMemo(() => {
+    const out = [];
+    for (const p of datakomProjects) {
+      if (p.datakomContainer) {
+        for (const child of p.childProjects ?? []) out.push({ id: child.id, name: child.name, children: child.locations });
+      } else {
+        out.push({ id: p.id, name: p.name, children: p.locations });
+      }
+    }
+    return out;
+  }, [datakomProjects]);
   // Every Datakom device (flat, sorted) — so a NEW device in any location can be
   // linked to the Datakom server from the add-device form, not only via a
   // cascade under a Datakom-imported location.
@@ -1165,12 +1184,39 @@ const [locationInputs, setLocationInputs] = useState({});
   const handleUpdateProject = async (projectId, draft) => {
     const name = String(draft.name ?? '').trim();
     if (!name) return { ok: false, error: 'Name is required' };
-    // Datakom Rainbow nodes (read-only cloud): store a local name override
-    // (keyed by the project id) rather than a DB update. They can't be nested.
+    // Datakom container folder: renaming it reassigns every member node to the
+    // new container name (the name IS the grouping key).
+    if (String(projectId).startsWith('dk-container-')) {
+      const cont = datakomProjects.find((p) => p.id === projectId);
+      const members = cont?.childProjects ?? [];
+      try {
+        await Promise.all(members.map((m) => datakomApi.setNodeContainer(m.id, name)));
+        setDatakomNodeContainers((prev) => {
+          const next = { ...prev };
+          for (const m of members) next[m.id] = name;
+          return next;
+        });
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message || 'Rename failed' };
+      }
+    }
+    // Datakom Rainbow node (read-only cloud): store a local name override, and
+    // optionally its container assignment. `draft.datakomContainer` present =
+    // move it into (or, if empty, out of) a container folder.
     if (String(projectId).startsWith('dk-')) {
       try {
         await datakomApi.setNodeName(projectId, name);
         setDatakomNodeNames((prev) => ({ ...prev, [projectId]: name }));
+        if (Object.prototype.hasOwnProperty.call(draft, 'datakomContainer')) {
+          const c = String(draft.datakomContainer ?? '').trim();
+          await datakomApi.setNodeContainer(projectId, c);
+          setDatakomNodeContainers((prev) => {
+            const next = { ...prev };
+            if (c) next[projectId] = c; else delete next[projectId];
+            return next;
+          });
+        }
         return { ok: true };
       } catch (err) {
         return { ok: false, error: err.message || 'Rename failed' };

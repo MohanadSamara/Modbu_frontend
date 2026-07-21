@@ -39,6 +39,17 @@ export const datakomApi = {
       prefix: 'Failed to save node name',
     }),
 
+  // ── Node containers (local grouping folders) ────────────────────────────
+  // nodeContainers() → { [nodeId]: containerName }. setNodeContainer with an
+  // empty name clears it (node returns to top level). Write = datakom.write.
+  nodeContainers: () =>
+    request('/brands/datakom/node-containers', { prefix: 'Failed to fetch node containers' }),
+  setNodeContainer: (nodeId, container) =>
+    request(`/brands/datakom/node-containers/${encodeURIComponent(nodeId)}`, {
+      method: 'PUT', body: { container: container ?? '' },
+      prefix: 'Failed to save container',
+    }),
+
   // ── Cloud control (SCAFFOLD) ────────────────────────────────────────────
   // Remote start/stop over Datakom's cloud. Wired end-to-end but the backend
   // stays inert (HTTP 501, code CONTROL_NOT_CONFIGURED) until the Rainbow

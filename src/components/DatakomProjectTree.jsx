@@ -39,29 +39,58 @@ export default function DatakomProjectTree() {
   // Local custom names for cloud nodes ({ nodeId: name }). Fetched once and
   // refreshed after a rename; applied over the cloud names in buildSidebarProjects.
   const [nodeNames, setNodeNames] = useState({});
+  const [nodeContainers, setNodeContainers] = useState({});
   const refreshNodeNames = async () => {
     try { setNodeNames(await datakomApi.nodeNames() || {}); } catch { /* keep last */ }
   };
-  useEffect(() => { refreshNodeNames(); }, []);
+  const refreshNodeContainers = async () => {
+    try { setNodeContainers(await datakomApi.nodeContainers() || {}); } catch { /* keep last */ }
+  };
+  useEffect(() => { refreshNodeNames(); refreshNodeContainers(); }, []);
 
-  // Persist a cloud-name override, then reflect it immediately. Used for both
-  // nodes (onUpdateLocation) and the wrapper project (onUpdateProject) — the id
-  // is the key the backend stores. Shaped like the sidebar handlers ({ ok, error }).
-  const saveOverride = async (id, name) => {
+  // Rename a node (name override) and optionally move it into a container folder.
+  const renameNode = async (_projectId, nodeId, draft) => {
     try {
-      await datakomApi.setNodeName(id, name);
+      await datakomApi.setNodeName(nodeId, draft.name);
       setNodeNames((prev) => {
         const next = { ...prev };
-        if (name.trim()) next[id] = name.trim(); else delete next[id];
+        if (draft.name.trim()) next[nodeId] = draft.name.trim(); else delete next[nodeId];
         return next;
       });
+      if (Object.prototype.hasOwnProperty.call(draft, 'datakomContainer')) {
+        const c = String(draft.datakomContainer ?? '').trim();
+        await datakomApi.setNodeContainer(nodeId, c);
+        setNodeContainers((prev) => {
+          const next = { ...prev };
+          if (c) next[nodeId] = c; else delete next[nodeId];
+          return next;
+        });
+      }
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message || 'Rename failed' };
     }
   };
-  const renameNode = (_projectId, nodeId, { name }) => saveOverride(nodeId, name);
-  const renameProject = (projectId, { name }) => saveOverride(projectId, name);
+  // Rename a project: a container folder reassigns its members; a plain node
+  // saves a name override.
+  const renameProject = async (projectId, { name }) => {
+    if (String(projectId).startsWith('dk-container-')) {
+      const cont = projects.find((p) => p.id === projectId);
+      const members = cont?.childProjects ?? [];
+      try {
+        await Promise.all(members.map((m) => datakomApi.setNodeContainer(m.id, name)));
+        setNodeContainers((prev) => {
+          const next = { ...prev };
+          for (const m of members) next[m.id] = name;
+          return next;
+        });
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message || 'Rename failed' };
+      }
+    }
+    return renameNode(null, projectId, { name });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -92,8 +121,8 @@ export default function DatakomProjectTree() {
   }, []);
 
   const { projects, deviceIndex, onlineIds } = useMemo(
-    () => (tree ? buildSidebarProjects(tree, nodeNames) : { projects: [], deviceIndex: new Map(), onlineIds: new Set() }),
-    [tree, nodeNames]
+    () => (tree ? buildSidebarProjects(tree, nodeNames, nodeContainers) : { projects: [], deviceIndex: new Map(), onlineIds: new Set() }),
+    [tree, nodeNames, nodeContainers]
   );
 
   const toggleProject = (id) => setExpandedProjects((p) => ({ ...p, [id]: !p[id] }));
