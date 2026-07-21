@@ -113,6 +113,10 @@ export default function ProjectsSidebar({
   // Read-only mode: hides every create/rename/delete control. Used for
   // cloud-sourced trees (e.g. Datakom Rainbow) that can't be edited here.
   readOnly = false,
+  // Allow renaming location nodes even in read-only mode (used by the Datakom
+  // tree: cloud data is otherwise read-only, but a node's DISPLAY name can be
+  // overridden locally by users with datakom.write). Wired to onUpdateLocation.
+  allowLocationRename = false,
   title = 'Projects',
   // Cascade helpers/handlers for building DB entities from the Datakom Rainbow
   // tree. Null when the page isn't offering the integration.
@@ -253,6 +257,7 @@ export default function ProjectsSidebar({
                 alarmsMap={alarmsMap}
                 onAcceptAlarm={onAcceptAlarm}
                 readOnly={readOnly}
+                allowLocationRename={allowLocationRename}
                 datakom={datakom}
               />
             ))}
@@ -280,6 +285,7 @@ function ProjectNode({
   shouldShowDevice,
   alarmsMap, onAcceptAlarm,
   readOnly = false,
+  allowLocationRename = false,
   datakom = null,
 }) {
   const { canFeature, canUseElement } = useAuth();
@@ -422,6 +428,7 @@ function ProjectNode({
                   alarmsMap={alarmsMap}
                   onAcceptAlarm={onAcceptAlarm}
                   readOnly={effReadOnly}
+                  allowLocationRename={allowLocationRename}
                   datakom={datakom}
                 />
               ))}
@@ -449,13 +456,22 @@ function LocationNode({
   shouldShowDevice,
   alarmsMap, onAcceptAlarm,
   readOnly = false,
+  allowLocationRename = false,
   datakom = null,
 }) {
-  const { canFeature, canUseElement } = useAuth();
+  const { canFeature, canUseElement, hasPermission } = useAuth();
   const effReadOnly = readOnly || !!project.readOnly;
   const canWriteProject = !effReadOnly && canFeature('button.project.write');
   const canWriteDevice  = !effReadOnly && canFeature('button.device.write');
-  const canEditLocation = canWriteProject && canUseElement('project.rename');
+  // Rename is available either through normal project-write access, OR — for a
+  // Datakom cloud node (id 'dk-node-…') when allowLocationRename is set — to
+  // holders of datakom.write, who can override the node's DISPLAY name locally.
+  // Scoping to dk-node ids keeps the pencil off real DB locations, whose rename
+  // still requires project-write (avoids showing a button the API would reject).
+  const isDatakomNode = String(location.id).startsWith('dk-node-');
+  const canEditLocation =
+    (canWriteProject && canUseElement('project.rename')) ||
+    (allowLocationRename && isDatakomNode && hasPermission('datakom.write'));
 
   const open = !!expandedLocations[location.id];
   const active = activeLocationId === location.id;
@@ -598,6 +614,7 @@ function LocationNode({
                   alarmsMap={alarmsMap}
                   onAcceptAlarm={onAcceptAlarm}
                   readOnly={effReadOnly}
+                  allowLocationRename={allowLocationRename}
                   datakom={datakom}
                 />
               ))}

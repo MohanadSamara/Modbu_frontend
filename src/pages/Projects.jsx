@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import FuelGauge from '../components/FuelGauge.jsx';
 import ControlButtons from '../components/ControlButtons.jsx';
@@ -260,6 +260,14 @@ export default function Projects() {
   // the project-tree view — flat mode (device.read without project.read) keeps
   // the standalone <DatakomProjectTree> below its device list.
   const [datakomTree, setDatakomTree] = useState(null);
+  // Local custom names for Datakom cloud nodes ({ nodeId: name }), applied over
+  // the cloud names so a rename here shows everywhere. Refreshed after a rename.
+  const [datakomNodeNames, setDatakomNodeNames] = useState({});
+  const refreshDatakomNodeNames = useCallback(async () => {
+    if (!canReadDatakom) return;
+    try { setDatakomNodeNames(await datakomApi.nodeNames() || {}); } catch { /* keep last */ }
+  }, [canReadDatakom]);
+  useEffect(() => { refreshDatakomNodeNames(); }, [refreshDatakomNodeNames]);
   useEffect(() => {
     if (!canReadDatakom || flatMode) { setDatakomTree(null); return undefined; }
     let cancelled = false;
@@ -287,9 +295,9 @@ export default function Projects() {
   // and the live status dots.
   const { projects: datakomProjects, deviceIndex: datakomIndex, onlineIds: datakomOnline } = useMemo(
     () => (datakomTree
-      ? buildSidebarProjects(datakomTree)
+      ? buildSidebarProjects(datakomTree, datakomNodeNames)
       : { projects: [], deviceIndex: new Map(), onlineIds: new Set() }),
-    [datakomTree]
+    [datakomTree, datakomNodeNames]
   );
 
   // ── Live alarms map: backendDeviceId (string) → alarm[] ─────────────────
@@ -1136,6 +1144,18 @@ const [locationInputs, setLocationInputs] = useState({});
     const name = String(draft.name ?? '').trim();
     if (!name) return { ok: false, error: 'Name is required' };
 
+    // Datakom cloud node (read-only tree): the name can't change on Datakom's
+    // side, so store a local display-name override instead of a DB update.
+    if (String(locationId).startsWith('dk-node-')) {
+      try {
+        await datakomApi.setNodeName(locationId, name);
+        setDatakomNodeNames((prev) => ({ ...prev, [locationId]: name }));
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message || 'Rename failed' };
+      }
+    }
+
     // Find the location (top level or nested) to get its backendId.
     const findLoc = (locs) => {
       for (const l of locs) {
@@ -1514,6 +1534,9 @@ const [locationInputs, setLocationInputs] = useState({});
         {/* Sidebar */}
         <ProjectsSidebar
           projects={sidebarProjects}
+          // Datakom nodes (read-only cloud) can still be renamed locally by
+          // datakom.write holders; the sidebar shows a pencil on those nodes.
+          allowLocationRename
           shouldShowDevice={sidebarShouldShowDevice}
           projectName={projectName}
           setProjectName={setProjectName}

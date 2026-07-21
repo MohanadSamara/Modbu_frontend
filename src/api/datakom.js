@@ -27,6 +27,18 @@ export const datakomApi = {
   tree: () =>
     request('/brands/datakom/tree', { prefix: 'Failed to fetch Datakom tree' }),
 
+  // ── Node name overrides ─────────────────────────────────────────────────
+  // Custom display names for cloud nodes, stored locally (the cloud is never
+  // changed). nodeNames() → { [nodeId]: customName }. setNodeName with an empty
+  // name clears the override (reverts to the portal name). Write = datakom.write.
+  nodeNames: () =>
+    request('/brands/datakom/node-names', { prefix: 'Failed to fetch node names' }),
+  setNodeName: (nodeId, name) =>
+    request(`/brands/datakom/node-names/${encodeURIComponent(nodeId)}`, {
+      method: 'PUT', body: { name: name ?? '' },
+      prefix: 'Failed to save node name',
+    }),
+
   // ── Cloud control (SCAFFOLD) ────────────────────────────────────────────
   // Remote start/stop over Datakom's cloud. Wired end-to-end but the backend
   // stays inert (HTTP 501, code CONTROL_NOT_CONFIGURED) until the Rainbow

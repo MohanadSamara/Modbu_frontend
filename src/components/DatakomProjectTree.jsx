@@ -36,6 +36,31 @@ export default function DatakomProjectTree() {
   const [activeLocationId, setActiveLocationId] = useState(null);
   const [activeDeviceId, setActiveDeviceId] = useState(null);
 
+  // Local custom names for cloud nodes ({ nodeId: name }). Fetched once and
+  // refreshed after a rename; applied over the cloud names in buildSidebarProjects.
+  const [nodeNames, setNodeNames] = useState({});
+  const refreshNodeNames = async () => {
+    try { setNodeNames(await datakomApi.nodeNames() || {}); } catch { /* keep last */ }
+  };
+  useEffect(() => { refreshNodeNames(); }, []);
+
+  // Rename a cloud node: persist the override, then reflect it immediately.
+  // Shaped like the sidebar's onUpdateLocation ({ ok, error }); ignores the
+  // synthetic project id — the node id is all the backend needs.
+  const renameNode = async (_projectId, nodeId, { name }) => {
+    try {
+      await datakomApi.setNodeName(nodeId, name);
+      setNodeNames((prev) => {
+        const next = { ...prev };
+        if (name.trim()) next[nodeId] = name.trim(); else delete next[nodeId];
+        return next;
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message || 'Rename failed' };
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
@@ -65,8 +90,8 @@ export default function DatakomProjectTree() {
   }, []);
 
   const { projects, deviceIndex, onlineIds } = useMemo(
-    () => (tree ? buildSidebarProjects(tree) : { projects: [], deviceIndex: new Map(), onlineIds: new Set() }),
-    [tree]
+    () => (tree ? buildSidebarProjects(tree, nodeNames) : { projects: [], deviceIndex: new Map(), onlineIds: new Set() }),
+    [tree, nodeNames]
   );
 
   const toggleProject = (id) => setExpandedProjects((p) => ({ ...p, [id]: !p[id] }));
@@ -96,6 +121,9 @@ export default function DatakomProjectTree() {
       {/* Sidebar — reuses the DB tree component in read-only mode. */}
       <ProjectsSidebar
         readOnly
+        // Even though the tree is read-only cloud data, users with datakom.write
+        // may rename nodes locally — enabled by this flag, wired to renameNode.
+        allowLocationRename
         title="Datakom Rainbow"
         projects={projects}
         shouldShowDevice={() => true}
@@ -119,7 +147,7 @@ export default function DatakomProjectTree() {
         onDeleteLocation={noop}
         onDeleteDevice={noop}
         onUpdateProject={noop}
-        onUpdateLocation={noop}
+        onUpdateLocation={renameNode}
         onUpdateDevice={noop}
         connectedDeviceIds={onlineIds}
         addingDeviceFor={null}

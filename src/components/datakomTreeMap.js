@@ -10,7 +10,10 @@
 // status (online leaf ids).
 // ============================================================================
 
-export function buildSidebarProjects(tree) {
+// `overrides` ({ [nodeId]: customName }) lets a locally-stored name replace the
+// cloud node name (see datakom_node_names on the backend). The `cloudName` is
+// kept on each mapped node so the rename UI can show what the portal calls it.
+export function buildSidebarProjects(tree, overrides = {}) {
   const deviceIndex = new Map(); // leaf id → device summary (has .did)
   const onlineIds = new Set();   // leaf ids with a live reading
 
@@ -21,18 +24,24 @@ export function buildSidebarProjects(tree) {
     return { id, name: dev.sid || `Device ${dev.did}`, backendId: null, datakomDid: dev.did };
   };
 
-  const mapNode = (node) => ({
-    id: `dk-node-${node.id}`,
-    name: node.name || `Node ${node.id}`,
-    children: (node.children || []).map(mapNode),
-    devices: (node.devices || []).map(mapDevice),
-  });
+  const mapNode = (node) => {
+    const id = `dk-node-${node.id}`;
+    const cloudName = node.name || `Node ${node.id}`;
+    return {
+      id,
+      name: overrides[id] || cloudName,
+      cloudName,
+      children: (node.children || []).map(mapNode),
+      devices: (node.devices || []).map(mapDevice),
+    };
+  };
 
   const locations = (tree.roots || []).map(mapNode);
   if (tree.ungrouped && tree.ungrouped.length) {
     locations.push({
       id: 'dk-node-ungrouped',
-      name: 'Ungrouped',
+      name: overrides['dk-node-ungrouped'] || 'Ungrouped',
+      cloudName: 'Ungrouped',
       children: [],
       devices: tree.ungrouped.map(mapDevice),
     });
