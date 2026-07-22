@@ -116,9 +116,14 @@ export default function DatakomDeviceLive({ did, deviceId, deviceIp, onSyncIp, o
   }, [did]);
 
   const cloudIp = info.ip;
+  // The Cloud IP / "Use this IP" sync row only makes sense for devices that use
+  // the IP/Modbus method (they already carry a stored IP). Once the IP is removed
+  // the device is intentionally cloud-only, so we hide the row entirely instead of
+  // nagging the user to re-add the cloud-reported IP they just cleared.
+  const hasStoredIp = String(deviceIp ?? '').trim() !== '';
   // Offer the IP only when the cloud reports one AND it differs from what the
   // platform device already has (so we don't nag once it's saved).
-  const canOfferIp = !!onSyncIp && !!cloudIp && String(deviceIp ?? '').trim() !== String(cloudIp).trim();
+  const canOfferIp = hasStoredIp && !!onSyncIp && !!cloudIp && String(deviceIp).trim() !== String(cloudIp).trim();
   const [ipBusy, setIpBusy] = useState(false);
   const [ipMsg, setIpMsg] = useState('');
   const saveIp = async () => {
@@ -165,7 +170,7 @@ export default function DatakomDeviceLive({ did, deviceId, deviceIp, onSyncIp, o
           one-click sync so the device gains a Modbus/IP address pulled from the
           cloud. The IP is network-infrastructure detail, so the WHOLE row (not
           just the sync button) is visible only to users with device.write. */}
-      {cloudIp && (
+      {cloudIp && hasStoredIp && (
         <Can permission="device.write">
           <div className="flex items-center justify-between gap-2 px-1 text-[11px]">
             <span className="text-gray-500">
