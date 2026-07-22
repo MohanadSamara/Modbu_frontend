@@ -174,8 +174,9 @@ export default function FuelGauge({ className = '', isConnected = false, target 
         })
         .catch(() => {});
     };
-    // Fetch snooze every 1 second so multi-user accepts are seen immediately
-    const id = setInterval(poll, 1000);
+    // Fetch snooze every 30 seconds — frequent enough for multi-user sync,
+    // without flooding the backend with a request per second.
+    const id = setInterval(poll, 30_000);
     return () => clearInterval(id);
   }, [targetId]);
 
