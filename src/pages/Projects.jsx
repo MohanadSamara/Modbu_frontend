@@ -481,6 +481,10 @@ const [locationInputs, setLocationInputs] = useState({});
   const [connectedDeviceIds, setConnectedDeviceIds] = useState(() => new Set());
   const [connectingDeviceId, setConnectingDeviceId] = useState(null);
   const [deviceConnectionErrors, setDeviceConnectionErrors] = useState({});
+  // Tracks devices that failed their primary method and were automatically
+  // switched to the fallback. 'cloud' = fell back from IP→Datakom cloud;
+  // 'ip' = fell back from cloud→IP (set when the cloud has a valid IP to try).
+  const [connectionFallback, setConnectionFallback] = useState({});
 
   const [backendError, setBackendError] = useState('');
 
@@ -595,6 +599,9 @@ const [locationInputs, setLocationInputs] = useState({});
 
   // Flattened { frontendId, backendId } list, kept fresh for the poll below.
   const devicesRef = useRef([]);
+  // Tracks device ids already auto-connected this session so we don't retry on
+  // every re-render while the device stays selected.
+  const autoConnectedRef = useRef(new Set());
   useEffect(() => {
     const flat = [];
     const walk = (locs) => {
@@ -669,6 +676,46 @@ const [locationInputs, setLocationInputs] = useState({});
     put('projects-sel-location-bid', locBid);
     put('projects-sel-project-bid', projBid);
   }, [activeProjectId, activeLocationId, activeDeviceId, projects]);
+
+  // Auto-connect: when the user selects a device that isn't already connected,
+  // kick off the connection via its available method automatically.
+  // Modbus/IP devices: call handleConnectDevice.
+  // Datakom cloud devices: DatakomDeviceLive handles the live feed itself, so
+  // no explicit connect call is needed for those.
+  useEffect(() => {
+    if (!activeDeviceId) return;
+    if (autoConnectedRef.current.has(activeDeviceId)) return;
+    if (!hasPermission('device.connect') || !canUseElement('device.connect')) return;
+
+    // Find the device in the tree or flat list.
+    let found = null;
+    const walk = (locs) => {
+      for (const l of locs || []) {
+        if (found) return;
+        const d = (l.devices || []).find((x) => x.id === activeDeviceId);
+        if (d) { found = d; return; }
+        if (l.children) walk(l.children);
+      }
+    };
+    for (const p of projects) { walk(p.locations); if (found) break; }
+    if (!found) found = flatDevices.find((d) => d.id === activeDeviceId) ?? null;
+    if (!found) return;
+
+    // Mark attempted regardless of path so we don't loop.
+    autoConnectedRef.current.add(activeDeviceId);
+
+    // Already connected — nothing to do.
+    if (connectedDeviceIds.has(found.id)) return;
+
+    // Datakom cloud devices show live readings via DatakomDeviceLive automatically.
+    // Exception: if the device ALSO has a valid IP, try Modbus/IP first so the
+    // user gets the richer connected state; if IP fails, handleConnectDevice will
+    // automatically fall back to the cloud panel (via connectionFallback).
+    if (connMethodOf(found) !== 'modbus' && !isIpv4(found.ip)) return;
+
+    handleConnectDevice(found);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDeviceId, projects, flatDevices]);
 
   const selection = useMemo(() => {
     for (const project of projects) {
@@ -1532,6 +1579,9 @@ const [locationInputs, setLocationInputs] = useState({});
 
   const handleConnectDevice = async (device) => {
     setDeviceConnectionErrors((prev) => ({ ...prev, [device.id]: '' }));
+    // Clear any previous fallback so a manual retry always attempts the primary
+    // method first; the fallback is re-set below if it fails again.
+    setConnectionFallback((prev) => { const n = { ...prev }; delete n[device.id]; return n; });
     setConnectingDeviceId(device.id);
     try {
       // request() throws on any non-2xx — if we reach the next line, connect succeeded.
@@ -1543,7 +1593,13 @@ const [locationInputs, setLocationInputs] = useState({});
       const softError = result != null && result.success === false;
       if (softError) {
         const msg = result.error || result.detail || result.message || 'Connection refused by server';
-        setDeviceConnectionErrors((prev) => ({ ...prev, [device.id]: msg }));
+        // If the device also has a Datakom DID, silently fall back to the cloud
+        // panel instead of surfacing a raw error.
+        if (device.datakomDid != null && device.datakomDid !== '') {
+          setConnectionFallback((prev) => ({ ...prev, [device.id]: 'cloud' }));
+        } else {
+          setDeviceConnectionErrors((prev) => ({ ...prev, [device.id]: msg }));
+        }
         return;
       }
 
@@ -1565,10 +1621,16 @@ const [locationInputs, setLocationInputs] = useState({});
         } catch (e) { console.error('[connect] last_seen update failed:', e.message); }
       }
     } catch (error) {
-      setDeviceConnectionErrors((prev) => ({
-        ...prev,
-        [device.id]: error?.message || 'Connection failed'
-      }));
+      // If the device also has a Datakom DID, auto-fallback to the cloud panel
+      // instead of showing the raw error; the user sees "Switched to cloud".
+      if (device.datakomDid != null && device.datakomDid !== '') {
+        setConnectionFallback((prev) => ({ ...prev, [device.id]: 'cloud' }));
+      } else {
+        setDeviceConnectionErrors((prev) => ({
+          ...prev,
+          [device.id]: error?.message || 'Connection failed'
+        }));
+      }
     } finally {
       setConnectingDeviceId(null);
     }
@@ -1595,6 +1657,8 @@ const [locationInputs, setLocationInputs] = useState({});
       }
 
       setConnectedDeviceIds((prev) => { const next = new Set(prev); next.delete(deviceId); return next; });
+      // Clear any fallback so the next connect attempt retries the primary method.
+      setConnectionFallback((prev) => { const n = { ...prev }; delete n[deviceId]; return n; });
       // Persist offline status to DB.
       if (dev.backendId) {
         try {
@@ -1944,31 +2008,46 @@ const [locationInputs, setLocationInputs] = useState({});
               <DeviceLocationCard device={selection.device} />
 
               {/* ── Active connection method ── */}
-              {/* One method, decided by the identifier the device carries: an IP →
-                  Modbus/IP; otherwise a Datakom DID (or Datacom brand) → Datakom
-                  Rainbow cloud. No manual switch, no "both". */}
-              {connMethodOf(selection.device) === 'datakom' ? (
-                <div className="space-y-4">
-                  {selection.device.datakomDid != null ? (
-                    <DatakomDeviceLive
-                      did={selection.device.datakomDid}
-                      deviceId={selection.device.backendId}
-                      deviceIp={selection.device.ip}
-                      onSyncIp={(ip) => syncDeviceIpFromCloud(selection.device, ip)}
-                      onUnlink={() => handleLinkDatakom(selection.device, null)}
-                    />
-                  ) : (
-                    <DatakomLinkCard onLink={(did) => handleLinkDatakom(selection.device, did)} />
-                  )}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                  <FuelGauge isConnected={connectedDeviceIds.has(selection.device.id)}
-                    target={{ deviceId: selection.device.backendId, ip: selection.device.ip, port: selection.device.port }} />
-                  <ControlButtons isConnected={connectedDeviceIds.has(selection.device.id)}
-                    target={{ deviceId: selection.device.backendId, ip: selection.device.ip, port: selection.device.port }} />
-                </div>
-              )}
+              {/* Primary method is decided by the identifier the device carries.
+                  If the primary method failed and a fallback is available
+                  (connectionFallback[id] === 'cloud'), the cloud panel is shown
+                  instead with a banner explaining the switch. */}
+              {(() => {
+                const effectiveMethod =
+                  connectionFallback[selection.device.id] === 'cloud'
+                    ? 'datakom'
+                    : connMethodOf(selection.device);
+                return effectiveMethod === 'datakom' ? (
+                  <div className="space-y-4">
+                    {connectionFallback[selection.device.id] === 'cloud' && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
+                        <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        IP unreachable — switched to Datakom cloud automatically.
+                      </div>
+                    )}
+                    {selection.device.datakomDid != null ? (
+                      <DatakomDeviceLive
+                        did={selection.device.datakomDid}
+                        deviceId={selection.device.backendId}
+                        deviceIp={selection.device.ip}
+                        onSyncIp={(ip) => syncDeviceIpFromCloud(selection.device, ip)}
+                        onUnlink={() => handleLinkDatakom(selection.device, null)}
+                      />
+                    ) : (
+                      <DatakomLinkCard onLink={(did) => handleLinkDatakom(selection.device, did)} />
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <FuelGauge isConnected={connectedDeviceIds.has(selection.device.id)}
+                      target={{ deviceId: selection.device.backendId, ip: selection.device.ip, port: selection.device.port }} />
+                    <ControlButtons isConnected={connectedDeviceIds.has(selection.device.id)}
+                      target={{ deviceId: selection.device.backendId, ip: selection.device.ip, port: selection.device.port }} />
+                  </div>
+                );
+              })()}
             </div>
           )}
         </section>
