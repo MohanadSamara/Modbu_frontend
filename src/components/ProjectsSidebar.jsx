@@ -119,31 +119,30 @@ export default function ProjectsSidebar({
   allowLocationRename = false,
   // Candidate containers for the project edit form ([{ backendId, name }]).
   projectContainerOptions = [],
-  // Datakom folders: existing names for the node "move to folder" dropdown, and
-  // the handler behind the header "New folder" button.
-  datakomFolderOptions = [],
-  onCreateDatakomFolder = null,
+  // Handler behind the header "New folder" button — creates a container
+  // project. Projects are moved inside via their edit form's "Inside" dropdown.
+  onCreateFolder = null,
   title = 'Projects',
   // Cascade helpers/handlers for building DB entities from the Datakom Rainbow
   // tree. Null when the page isn't offering the integration.
   datakom = null,
 }) {
-  const { canFeature, hasPermission } = useAuth();
+  const { canFeature } = useAuth();
   const canWriteProject = !readOnly && canFeature('button.project.write');
-  // Datakom folder management is available when the page enabled it and the
-  // user can write Datakom (same gate as node rename).
-  const canManageDatakomFolders = allowLocationRename && !!onCreateDatakomFolder && hasPermission('datakom.write');
+  // Folder creation rides on project-write access (a folder IS a container
+  // project under the hood).
+  const canManageFolders = !!onCreateFolder && canWriteProject;
 
   // The "+" add button opens a menu: create the typed name and/or import an
   // existing Datakom Rainbow project. Closes on outside click.
   const addMenuRef = useRef(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  // "New folder" inline input (Datakom grouping).
+  // "New folder" inline input.
   const [folderInput, setFolderInput] = useState('');
   const [folderOpen, setFolderOpen] = useState(false);
   const [folderErr, setFolderErr] = useState('');
   const submitFolder = async () => {
-    const res = await onCreateDatakomFolder?.(folderInput);
+    const res = await onCreateFolder?.(folderInput);
     if (res?.ok) { setFolderInput(''); setFolderOpen(false); setFolderErr(''); }
     else setFolderErr(res?.error || 'Failed');
   };
@@ -167,11 +166,11 @@ export default function ProjectsSidebar({
           </svg>
         </div>
         <span className="text-sm font-semibold text-gray-200">{title}</span>
-        {canManageDatakomFolders && (
+        {canManageFolders && (
           <button
             type="button"
             onClick={() => { setFolderOpen((v) => !v); setFolderErr(''); }}
-            title="Create a folder to group Datakom nodes"
+            title="Create a folder — projects, locations and devices can be placed inside"
             className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-white/5 border border-white/10 text-gray-300 hover:bg-white/10 transition-colors"
           >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -181,11 +180,11 @@ export default function ProjectsSidebar({
             New folder
           </button>
         )}
-        <span className={`text-xs text-gray-600 font-mono ${canManageDatakomFolders ? 'ml-2' : 'ml-auto'}`}>{projects.length}</span>
+        <span className={`text-xs text-gray-600 font-mono ${canManageFolders ? 'ml-2' : 'ml-auto'}`}>{projects.length}</span>
       </div>
 
-      {/* New folder inline input (Datakom grouping) */}
-      {canManageDatakomFolders && folderOpen && (
+      {/* New folder inline input */}
+      {canManageFolders && folderOpen && (
         <div className="px-3 py-3 border-b border-white/5 flex-shrink-0">
           <div className="flex gap-1.5">
             <input
@@ -203,7 +202,7 @@ export default function ProjectsSidebar({
             </button>
           </div>
           {folderErr && <p className="text-[10px] text-red-400 mt-1">{folderErr}</p>}
-          <p className="text-[10px] text-gray-600 mt-1">Then open a node's edit (pencil) and pick this folder to move it in.</p>
+          <p className="text-[10px] text-gray-600 mt-1">Then open a project's edit (pencil) and pick "Inside: {folderInput.trim() || 'this folder'}" to move it in. Locations and devices move via their own edit forms.</p>
         </div>
       )}
 
@@ -314,7 +313,6 @@ export default function ProjectsSidebar({
                 readOnly={readOnly}
                 allowLocationRename={allowLocationRename}
                 projectContainerOptions={projectContainerOptions}
-                datakomFolderOptions={datakomFolderOptions}
                 datakom={datakom}
               />
             ))}
@@ -502,7 +500,7 @@ function ProjectNode({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
               d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
-          <span className="truncate text-sm font-semibold">{project.name}</span>
+          <span dir="auto" className="truncate text-sm font-semibold">{project.name}</span>
           <span className="ml-1 text-[10px] text-gray-600 flex-shrink-0">{itemCount}</span>
         </button>
         {canEditProject && (
@@ -526,7 +524,7 @@ function ProjectNode({
       )}
 
       {open && (
-        <div className="ml-4 border-l border-white/5 pl-3 mt-1 space-y-1">
+        <div className="ml-2 border-l border-white/5 pl-2 mt-1 space-y-1">
           {/* Child projects — this project acts as a container. Rendered as full
               (recursive) ProjectNodes so they carry their own locations/devices
               and can themselves be containers. */}
@@ -718,9 +716,12 @@ function LocationNode({
   // A cloud (Datakom) draft flips to IP method the moment a valid IP is typed —
   // the device is then reachable over Modbus/IP too. Drives the live chip below.
   const draftValidIp = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(String(draft.ip ?? '').trim());
-  const draftMethod = draft.connType === 'datakom' ? (draftValidIp ? 'ip' : 'cloud') : 'ip';
-  // Brand chosen in step 1 of the add-device form — drives the badge + method.
+  // The brand is just another field of the form; a cloud brand or a typed DID
+  // marks the draft as Datakom-linked. IP wins as the active method when valid.
   const draftBrand = (brands ?? []).find((b) => String(b.id) === String(draft.brandId)) ?? null;
+  const draftHasDid = String(draft.datakomDid ?? '').trim() !== '';
+  const draftCloud = draftHasDid || isCloudBrand(draftBrand?.name);
+  const draftMethod = draftValidIp ? 'ip' : (draftCloud ? 'cloud' : 'ip');
   // Any Datakom node can be linked to a sub-location (free choice, not scoped).
   const dkSubNodes = !effReadOnly ? (datakom?.allNodes ?? []) : [];
 
@@ -729,6 +730,8 @@ function LocationNode({
   const [editErr, setEditErr] = useState('');
   // Add-sub-location "+" menu (only when Datakom nodes exist).
   const [subMenuOpen, setSubMenuOpen] = useState(false);
+  // The sub-location input is collapsed behind a small button by default.
+  const [subFormOpen, setSubFormOpen] = useState(false);
   const startEdit = () => { setNameDraft(location.name); setEditErr(''); setEditing(true); };
   const saveEdit = async () => {
     const res = await onUpdateLocation(project.id, location.id, { name: nameDraft });
@@ -756,7 +759,7 @@ function LocationNode({
               d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          <span className="truncate text-xs font-medium">{location.name}</span>
+          <span dir="auto" className="truncate text-xs font-medium">{location.name}</span>
         </button>
         {canEditLocation && (
           <button
@@ -779,49 +782,66 @@ function LocationNode({
       )}
 
       {open && (
-        <div className="ml-4 border-l border-white/5 pl-3 mt-0.5 space-y-1 pb-1">
-          {/* Add sub-location. The + opens a Datakom menu when this location has
-              child nodes; otherwise it creates directly. */}
+        <div className="ml-2 border-l border-white/5 pl-2 mt-0.5 space-y-1 pb-1">
+          {/* Add sub-location — collapsed into a small button so a deeply nested
+              tree isn't drowned in permanently-open inputs. */}
           {canWriteProject && (
-            <div className="pt-1">
-              <div className="flex gap-1">
-                <input
-                  type="text"
-                  value={subLocationInputs[location.id] ?? ''}
-                  onChange={(e) => setSubLocationInputs((p) => ({ ...p, [location.id]: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onCreateSubLocation(project.id, location.id); setSubMenuOpen(false); } }}
-                  placeholder="Sub-location…"
-                  className="flex-1 px-2 py-1.5 rounded-lg bg-[#0f1117] border border-white/10 text-[11px] text-gray-300 placeholder-gray-600
-                    focus:outline-none focus:ring-1 focus:ring-blue-500/30 transition-colors"
-                />
+            <div className="pt-0.5">
+              {!subFormOpen ? (
                 <button
-                  onClick={() => {
-                    if (dkSubNodes.length > 0) setSubMenuOpen((o) => !o);
-                    else onCreateSubLocation(project.id, location.id);
-                  }}
-                  title="Add sub-location"
-                  aria-haspopup={dkSubNodes.length > 0 ? 'menu' : undefined}
-                  aria-expanded={dkSubNodes.length > 0 ? subMenuOpen : undefined}
-                  className="px-2 py-1.5 rounded-lg bg-white/10 text-gray-300 hover:bg-white/20 transition-colors"
+                  onClick={() => setSubFormOpen(true)}
+                  className="w-full flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] text-gray-600 hover:text-blue-400 hover:bg-blue-500/5 transition-colors"
                 >
                   <PlusIcon />
+                  Sub-location
                 </button>
-              </div>
-              {subMenuOpen && dkSubNodes.length > 0 && (
-                <InlineAddMenu
-                  primary={{
-                    label: (subLocationInputs[location.id] ?? '').trim()
-                      ? `Create “${(subLocationInputs[location.id] ?? '').trim()}” (no link)`
-                      : 'Type a name above, or link to a Datakom node',
-                    onClick: () => onCreateSubLocation(project.id, location.id),
-                  }}
-                  sectionLabel="Link to Datakom node"
-                  options={dkSubNodes}
-                  optionKey={(n) => n.id}
-                  optionLabel={(n) => n.name}
-                  onPick={(n) => datakom.onCreateSubLocation(project.id, location.id, n)}
-                  onClose={() => setSubMenuOpen(false)}
-                />
+              ) : (
+                <div>
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      value={subLocationInputs[location.id] ?? ''}
+                      onChange={(e) => setSubLocationInputs((p) => ({ ...p, [location.id]: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); onCreateSubLocation(project.id, location.id); setSubMenuOpen(false); setSubFormOpen(false); }
+                        if (e.key === 'Escape') { setSubMenuOpen(false); setSubFormOpen(false); }
+                      }}
+                      placeholder="Sub-location…"
+                      autoFocus
+                      className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-[#0f1117] border border-white/10 text-[11px] text-gray-300 placeholder-gray-600
+                        focus:outline-none focus:ring-1 focus:ring-blue-500/30 transition-colors"
+                    />
+                    <button
+                      onClick={() => {
+                        if (dkSubNodes.length > 0) { setSubMenuOpen((o) => !o); return; }
+                        onCreateSubLocation(project.id, location.id);
+                        setSubFormOpen(false);
+                      }}
+                      title="Add sub-location"
+                      aria-haspopup={dkSubNodes.length > 0 ? 'menu' : undefined}
+                      aria-expanded={dkSubNodes.length > 0 ? subMenuOpen : undefined}
+                      className="px-2 py-1.5 rounded-lg bg-white/10 text-gray-300 hover:bg-white/20 transition-colors"
+                    >
+                      <PlusIcon />
+                    </button>
+                  </div>
+                  {subMenuOpen && dkSubNodes.length > 0 && (
+                    <InlineAddMenu
+                      primary={{
+                        label: (subLocationInputs[location.id] ?? '').trim()
+                          ? `Create “${(subLocationInputs[location.id] ?? '').trim()}” (no link)`
+                          : 'Type a name above, or link to a Datakom node',
+                        onClick: () => { onCreateSubLocation(project.id, location.id); setSubFormOpen(false); },
+                      }}
+                      sectionLabel="Link to Datakom node"
+                      options={dkSubNodes}
+                      optionKey={(n) => n.id}
+                      optionLabel={(n) => n.name}
+                      onPick={(n) => { datakom.onCreateSubLocation(project.id, location.id, n); setSubFormOpen(false); }}
+                      onClose={() => setSubMenuOpen(false)}
+                    />
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -878,87 +898,12 @@ function LocationNode({
           {canWriteDevice && (addingDeviceFor === location.id ? (
             <div className="rounded-xl bg-[#0f1117] border border-white/10 p-3 space-y-2 mt-1">
 
-              {/* ── Step 1: choose the brand ── */}
-              {/* Brand is required and decides the method: a Datakom/Datacom brand
-                  → Datakom Rainbow cloud; any other brand → Modbus/IP. */}
-              {!draft.brandId ? (
+              {/* ── ONE form, all the device's info at once: name, brand, IP,
+                  DID, GPS, description. No brand-first step — the brand is just
+                  another field, and a Datakom brand (or a typed DID) makes the
+                  device cloud-linked automatically. */}
+              {(
                 <>
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-gray-500 pb-0.5">
-                    Choose brand
-                  </p>
-                  {(brands ?? []).length === 0 ? (
-                    <p className="text-[11px] text-gray-500 py-1">
-                      No brands defined yet. Add one on the Brands page, then come back.
-                    </p>
-                  ) : (brands ?? []).map((b) => {
-                    const cloud = isCloudBrand(b.name);
-                    return (
-                      <button
-                        key={b.id}
-                        type="button"
-                        onClick={() => {
-                          // Pick the brand and derive the connection type from it.
-                          updateDeviceDraft(location.id, 'brandId', String(b.id));
-                          updateDeviceDraft(location.id, 'connType', cloud ? 'datakom' : 'modbus');
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all
-                          hover:border-white/20 hover:bg-white/5 border-white/8 text-gray-400"
-                      >
-                        <span className={`flex-shrink-0 ${cloud ? 'text-orange-400' : 'text-blue-400'}`}>
-                          {cloud ? (
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                            </svg>
-                          ) : (
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
-                            </svg>
-                          )}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold leading-none mb-0.5 text-gray-200">{b.name}</p>
-                          <p className="text-[10px] text-gray-500 leading-snug">
-                            {cloud ? 'Datakom Rainbow cloud' : 'Modbus / IP'}
-                          </p>
-                        </div>
-                        <svg className="w-3.5 h-3.5 flex-shrink-0 ml-auto text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                    );
-                  })}
-                  <button
-                    onClick={() => cancelAddDevice(location.id)}
-                    className="w-full py-1.5 rounded-lg bg-white/5 text-gray-500 text-xs hover:bg-white/10 transition-colors mt-1"
-                  >
-                    Cancel
-                  </button>
-                </>
-              ) : (
-                /* ── Step 2: fill device details ── */
-                <>
-                  {/* Brand badge + back button (Back returns to the brand chooser) */}
-                  <div className="flex items-center justify-between gap-2 pb-0.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        updateDeviceDraft(location.id, 'brandId', '');
-                        updateDeviceDraft(location.id, 'connType', null);
-                      }}
-                      className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
-                    >
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                      </svg>
-                      Change brand
-                    </button>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold
-                      ${draftMethod === 'ip' ? 'bg-blue-500/15 text-blue-300' : 'bg-orange-500/15 text-orange-300'}`}
-                    >
-                      {draftBrand?.name ?? 'Brand'} · {draftMethod === 'ip' ? 'IP' : 'Cloud'}
-                    </span>
-                  </div>
-
                   {/* Device name — always shown */}
                   <div>
                     <input
@@ -974,16 +919,29 @@ function LocationNode({
                     {errs.name && <p className="text-[10px] text-red-400 mt-0.5">{errs.name}</p>}
                   </div>
 
-                  {/* IP / Port. Required for Modbus/Both. For a Datakom (cloud)
-                      device it's OPTIONAL — but typing a valid IP flips the device
-                      to IP (Modbus) method (shown live by the chip below). */}
+                  {/* Brand / product — a plain field, no separate step. */}
+                  <select
+                    value={draft.brandId ?? ''}
+                    onChange={(e) => updateDeviceDraft(location.id, 'brandId', e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg text-xs bg-[#1a1d27] border border-white/10 text-gray-200
+                      focus:outline-none focus:ring-1 focus:ring-blue-500/30 transition-colors cursor-pointer"
+                  >
+                    <option value="" className="bg-[#1a1d27] text-gray-400">Brand / product (optional)…</option>
+                    {(brands ?? []).map((b) => (
+                      <option key={b.id} value={b.id} className="bg-[#1a1d27] text-gray-200">
+                        {b.name}{isCloudBrand(b.name) ? ' — Datakom Rainbow cloud' : ''}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* IP / Port — optional; a device can use IP, cloud (DID), or both. */}
                   <>
                     <div>
                       <input
                         type="text"
                         value={draft.ip}
                         onChange={(e) => updateDeviceDraft(location.id, 'ip', e.target.value)}
-                        placeholder={draft.connType === 'datakom' ? 'IP (optional — adding it switches to IP method)' : 'IP (e.g. 192.168.1.100)'}
+                        placeholder="IP (e.g. 192.168.1.100)"
                         className={`w-full px-2.5 py-1.5 rounded-lg text-xs text-gray-200 placeholder-gray-600 bg-[#1a1d27] border transition-colors
                           focus:outline-none focus:ring-1 focus:ring-blue-500/30 font-mono
                           ${errs.ip ? 'border-red-500/40 bg-red-500/5' : 'border-white/10'}`}
@@ -991,7 +949,7 @@ function LocationNode({
                       {errs.ip && <p className="text-[10px] text-red-400 mt-0.5">{errs.ip}</p>}
                     </div>
                     {/* Port only matters once there's an IP; hide for a pure cloud draft. */}
-                    {(draft.connType !== 'datakom' || draftValidIp) && (
+                    {(!draftCloud || draftValidIp) && (
                       <div>
                         <input
                           type="number"
@@ -1005,41 +963,51 @@ function LocationNode({
                         {errs.port && <p className="text-[10px] text-red-400 mt-0.5">{errs.port}</p>}
                       </div>
                     )}
-                    {/* Live method chip — only meaningful for a Datakom draft, where
-                        adding an IP flips cloud → IP method. */}
-                    {draft.connType === 'datakom' && (
+                    {/* Live method chip — shows what the device will use, from
+                        what's filled: valid IP → IP; DID / cloud brand → cloud. */}
+                    {draftCloud && (
                       <span className={`inline-flex w-fit items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border
                         ${draftMethod === 'ip'
                           ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                           : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
-                        {draftMethod === 'ip' ? '✓ Switched to IP (Modbus) method' : 'Cloud method (Datakom Rainbow)'}
+                        {draftMethod === 'ip' ? 'IP + Datakom cloud' : 'Datakom cloud'}
                       </span>
                     )}
                   </>
 
-                  {/* Datakom Cloud link — Datakom or Both */}
-                  {draft.connType !== 'modbus' && datakom?.allDevices?.length > 0 && (
+                  {/* Datakom DID — part of the device's own info, typed like the
+                      IP. Filling it IS the link (nothing else to do). The
+                      dropdown below is just a helper that fills it for you
+                      (available while the cloud connection is on). */}
+                  {(
                     <>
-                      <select
+                      <input
+                        type="text"
+                        inputMode="numeric"
                         value={draft.datakomDid ?? ''}
-                        onChange={(e) => datakom.onLinkDeviceDraft(location.id, e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-lg text-xs bg-[#1a1d27] border border-orange-500/25 text-orange-300/90
-                          focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-colors cursor-pointer"
-                      >
-                        <option value="" className="bg-[#1a1d27] text-gray-400">
-                          {draft.connType === 'both' ? 'Link to Datakom device (optional)…' : 'Select Datakom device…'}
-                        </option>
-                        {datakom.allDevices.map((d) => (
-                          <option key={d.datakomDid} value={d.datakomDid} className="bg-[#1a1d27] text-gray-200">
-                            {d.name} · did {d.datakomDid}
-                          </option>
-                        ))}
-                      </select>
-                      {draft.connType === 'datakom' && (
+                        onChange={(e) => updateDeviceDraft(location.id, 'datakomDid', e.target.value.trim())}
+                        placeholder="Datakom DID (e.g. 8118)"
+                        className="w-full px-2.5 py-1.5 rounded-lg text-xs text-gray-200 placeholder-gray-600 bg-[#1a1d27] border border-orange-500/25
+                          focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-colors font-mono"
+                      />
+                      {datakom?.allDevices?.length > 0 && (
+                        <select
+                          value=""
+                          onChange={(e) => { if (e.target.value !== '') datakom.onLinkDeviceDraft(location.id, e.target.value); }}
+                          className="w-full px-2.5 py-1.5 rounded-lg text-xs bg-[#1a1d27] border border-white/10 text-gray-400
+                            focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-colors cursor-pointer"
+                        >
+                          <option value="" className="bg-[#1a1d27] text-gray-400">…or pick from the cloud (fills DID/name/GPS)</option>
+                          {datakom.allDevices.map((d) => (
+                            <option key={d.datakomDid} value={d.datakomDid} className="bg-[#1a1d27] text-gray-200">
+                              {d.name} · did {d.datakomDid}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {draftHasDid && (
                         <p className="text-[10px] text-orange-400/80 leading-snug">
-                          {draft.datakomDid != null && draft.datakomDid !== ''
-                            ? `Linked to Datakom did ${draft.datakomDid}. GPS and readings synced from the cloud.`
-                            : 'Select a Datakom device above to pull live data from the cloud.'}
+                          Linked to Datakom did {draft.datakomDid} — readings come from the cloud automatically.
                         </p>
                       )}
                     </>
@@ -1227,7 +1195,9 @@ function DeviceNode({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
               d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
           </svg>
-          <span className="truncate text-[11px] font-medium">{device.name}</span>
+          <span dir="auto" className="truncate text-[11px] font-medium">
+            {String(device.name ?? '').trim() || `Device ${device.backendId ?? ''}`}
+          </span>
         </button>
         {/* Alarm badge: shows critical/warning count when alarms are present */}
         {alarms.length > 0 && (

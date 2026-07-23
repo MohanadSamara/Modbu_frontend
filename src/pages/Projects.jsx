@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import FuelGauge from '../components/FuelGauge.jsx';
 import ControlButtons from '../components/ControlButtons.jsx';
@@ -8,8 +8,6 @@ import modbusApi from '../api/modbus.js';
 import { projectsApi, locationsApi, devicesApi } from '../api/projects.js';
 import { brandsApi, isCloudBrand } from '../api/brands.js';
 import DatakomDeviceLive, { DatakomLinkCard } from '../components/DatakomDeviceLive.jsx';
-import DatakomProjectTree from '../components/DatakomProjectTree.jsx';
-import { buildSidebarProjects } from '../components/datakomTreeMap.js';
 import { datakomApi } from '../api/datakom.js';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { defaultSettings } from '../api/settings.js';
@@ -21,17 +19,6 @@ function createId() {
 }
 
 const isIpv4 = (v) => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(String(v ?? '').trim());
-
-// A device uses exactly ONE connection method, decided by the identifier it
-// carries: a valid IP → Modbus/IP; otherwise a Datakom DID (or, failing that, a
-// Datakom/Datacom brand) → Datakom Rainbow cloud. Adding a DID or an IP in the
-// edit form is what switches the method — shared by the card, details panel and
-// the edit chip so they never disagree.
-function connMethodOf(device) {
-  if (isIpv4(device?.ip)) return 'modbus';
-  if (device?.datakomDid != null && device.datakomDid !== '') return 'datakom';
-  return isCloudBrand(device?.brandName) ? 'datakom' : 'modbus';
-}
 
 // Set of backend device ids currently connected server-side, from GET /session.
 // Handles the new per-device shape ({ devices:[{deviceId,connected}] }) and the
@@ -237,25 +224,6 @@ async function loadProjectsTreeFromBackend() {
   );
 }
 
-// Re-attach Datakom-node links (projects/locations built by picking from the
-// Datakom tree) after a backend hydrate. The DB has no column for this, so the
-// link is remembered client-side, keyed by stable backend id.
-function reattachDatakomLinks(projects) {
-  let map = {};
-  try { map = JSON.parse(localStorage.getItem('projects-datakom-links') || '{}'); } catch { map = {}; }
-  if (!projects?.length) return projects;
-  const relocate = (locs) => (locs || []).map((l) => ({
-    ...l,
-    datakomNodeId: l.backendId != null ? (map[`l:${l.backendId}`] ?? l.datakomNodeId ?? null) : (l.datakomNodeId ?? null),
-    children: l.children ? relocate(l.children) : l.children,
-  }));
-  return projects.map((p) => ({
-    ...p,
-    datakomNodeId: p.backendId != null ? (map[`p:${p.backendId}`] ?? p.datakomNodeId ?? null) : (p.datakomNodeId ?? null),
-    locations: relocate(p.locations),
-  }));
-}
-
 export default function Projects() {
   const { settings, loading: settingsLoading } = useSettings();
   const { hasPermission, canUseElement } = useAuth();
@@ -271,82 +239,28 @@ export default function Projects() {
   const flatMode = !canReadProjects && canReadDevices;
   const [flatDevices, setFlatDevices] = useState([]);
 
-  // The read-only Datakom Rainbow cloud tree is MERGED into the same sidebar as
-  // the local DB projects (rather than a separate toggled view). Needs cloud/
-  // device read access.
+  // Datakom cloud read access — used only to offer the "link to Datakom device"
+  // dropdown in the add/duplicate device forms. The cloud tree itself is now
+  // SYNCED into the DB by the backend (datakom-sync.js), so every Datakom
+  // project/location/device is a normal editable row — no merged read-only tree.
   const canReadDatakom = hasPermission('datakom.read') || canReadDevices;
 
-  // Live Datakom tree, polled from the cloud adapter's in-memory cache. Only in
-  // the project-tree view — flat mode (device.read without project.read) keeps
-  // the standalone <DatakomProjectTree> below its device list.
-  const [datakomTree, setDatakomTree] = useState(null);
-  // Local custom names for Datakom cloud nodes ({ nodeId: name }), applied over
-  // the cloud names so a rename here shows everywhere. Refreshed after a rename.
-  const [datakomNodeNames, setDatakomNodeNames] = useState({});
-  const refreshDatakomNodeNames = useCallback(async () => {
-    if (!canReadDatakom) return;
-    try { setDatakomNodeNames(await datakomApi.nodeNames() || {}); } catch { /* keep last */ }
-  }, [canReadDatakom]);
-  useEffect(() => { refreshDatakomNodeNames(); }, [refreshDatakomNodeNames]);
-  // Local grouping of Datakom nodes into container folders ({ nodeId: name }).
-  const [datakomNodeContainers, setDatakomNodeContainers] = useState({});
-  const refreshDatakomNodeContainers = useCallback(async () => {
-    if (!canReadDatakom) return;
-    try { setDatakomNodeContainers(await datakomApi.nodeContainers() || {}); } catch { /* keep last */ }
-  }, [canReadDatakom]);
-  useEffect(() => { refreshDatakomNodeContainers(); }, [refreshDatakomNodeContainers]);
-
-  // Distinct folder names that currently exist (from node assignments + empty
-  // folder markers) — offered in the "move to folder" dropdown on each node.
-  const datakomFolderOptions = useMemo(
-    () => [...new Set(Object.values(datakomNodeContainers).map((v) => String(v).trim()).filter(Boolean))].sort(),
-    [datakomNodeContainers]
-  );
-
-  // Create an empty folder. Stored as a marker row (node id '__folder__:<name>')
-  // so the folder shows up even before any node is moved into it.
-  const handleCreateDatakomFolder = useCallback(async (name) => {
-    const clean = String(name ?? '').trim();
-    if (!clean) return { ok: false, error: 'Folder name required' };
-    try {
-      await datakomApi.setNodeContainer(`__folder__:${clean}`, clean);
-      setDatakomNodeContainers((prev) => ({ ...prev, [`__folder__:${clean}`]: clean }));
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err.message || 'Failed to create folder' };
-    }
-  }, []);
+  // Flat list of cloud devices for the "link to Datakom device" dropdown:
+  // [{ datakomDid, name }]. Loaded once (and refreshed lazily on remount).
+  const [datakomAllDevices, setDatakomAllDevices] = useState([]);
   useEffect(() => {
-    if (!canReadDatakom || flatMode) { setDatakomTree(null); return undefined; }
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const st = await datakomApi.status();
-        if (cancelled) return;
-        if (st?.ready) {
-          const t = await datakomApi.tree().catch(() => null);
-          if (!cancelled) setDatakomTree(t);
-        } else if (!cancelled) {
-          setDatakomTree(null);
-        }
-      } catch {
-        if (!cancelled) setDatakomTree(null);
-      }
-    };
-    tick();
-    const id = setInterval(tick, 5000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [canReadDatakom, flatMode]);
-
-  // Map the cloud tree into the sidebar's project shape (a single read-only
-  // "Datakom Rainbow" project). deviceIndex/onlineIds power the details panel
-  // and the live status dots.
-  const { projects: datakomProjects, deviceIndex: datakomIndex, onlineIds: datakomOnline } = useMemo(
-    () => (datakomTree
-      ? buildSidebarProjects(datakomTree, datakomNodeNames, datakomNodeContainers)
-      : { projects: [], deviceIndex: new Map(), onlineIds: new Set() }),
-    [datakomTree, datakomNodeNames, datakomNodeContainers]
-  );
+    if (!canReadDatakom) return undefined;
+    let alive = true;
+    datakomApi.devices()
+      .then((rows) => {
+        if (!alive) return;
+        setDatakomAllDevices((Array.isArray(rows) ? rows : [])
+          .map((d) => ({ datakomDid: d.did, name: d.sid || `Device ${d.did}` }))
+          .sort((a, b) => String(a.name).localeCompare(String(b.name))));
+      })
+      .catch(() => { if (alive) setDatakomAllDevices([]); });
+    return () => { alive = false; };
+  }, [canReadDatakom]);
 
   // ── Live alarms map: backendDeviceId (string) → alarm[] ─────────────────
   // Polled every 15 s. Used to show alarm badges on device cards in the sidebar.
@@ -489,18 +403,50 @@ const [locationInputs, setLocationInputs] = useState({});
   const [backendError, setBackendError] = useState('');
 
 
+  // ── Per-device connection preference ('ip' | 'cloud') ────────────────────
+  // For a device that carries BOTH identifiers, the USER decides which
+  // connection is active — only the chosen one runs/streams. Persisted per
+  // device (by stable backend id) so the choice sticks across visits.
+  const CONN_PREF_KEY = 'projects-conn-pref';
+  const [connPref, setConnPref] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(CONN_PREF_KEY)) || {}; } catch { return {}; }
+  });
+  const prefKeyOf = (device) => String(device.backendId ?? device.id);
+  const deviceHasCloud = (device) => device?.datakomDid != null || isCloudBrand(device?.brandName);
+  const prefOf = (device) => {
+    const hasIp = isIpv4(device?.ip);
+    if (!hasIp) return 'cloud';
+    if (!deviceHasCloud(device)) return 'ip';
+    return connPref[prefKeyOf(device)] === 'cloud' ? 'cloud' : 'ip';
+  };
+  const setDevicePref = (device, v) => {
+    setConnPref((prev) => {
+      const next = { ...prev, [prefKeyOf(device)]: v };
+      try { localStorage.setItem(CONN_PREF_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
+  // Bumped to re-run the hydrate effect (e.g. after duplicating a device into
+  // another project, where local-state surgery would be error-prone).
+  const [reloadTick, setReloadTick] = useState(0);
+  const reloadTree = () => setReloadTick((t) => t + 1);
+
   // On mount: load projects tree AND restore any existing Modbus session.
   // This means switching tabs never triggers a new TCP connect — the backend
   // keeps the session alive and we just read its state.
   useEffect(() => {
     if (!canReadProjects) return undefined; // tree needs project.read
+    // Legacy cleanup: client-side Datakom links are obsolete (the cloud tree is
+    // now synced into the DB) — drop the old key so no ghost state survives.
+    try { localStorage.removeItem('projects-datakom-links'); } catch { /* ignore */ }
     let cancelled = false;
     (async () => {
       // 1. Load projects tree from backend
       try {
         const hydrated = await loadProjectsTreeFromBackend();
         if (cancelled) return;
-        setProjects(reattachDatakomLinks(hydrated));
+        setProjects(hydrated);
         setBackendError('');
 
         // 1b. Re-select whatever was open before (matched by stable backend id)
@@ -553,7 +499,7 @@ const [locationInputs, setLocationInputs] = useState({});
       }
     })();
     return () => { cancelled = true; };
-  }, [canReadProjects]);
+  }, [canReadProjects, reloadTick]);
 
   // Flat mode: load devices directly (no project/location context required).
   useEffect(() => {
@@ -599,9 +545,6 @@ const [locationInputs, setLocationInputs] = useState({});
 
   // Flattened { frontendId, backendId } list, kept fresh for the poll below.
   const devicesRef = useRef([]);
-  // Tracks device ids already auto-connected this session so we don't retry on
-  // every re-render while the device stays selected.
-  const autoConnectedRef = useRef(new Set());
   useEffect(() => {
     const flat = [];
     const walk = (locs) => {
@@ -677,57 +620,45 @@ const [locationInputs, setLocationInputs] = useState({});
     put('projects-sel-project-bid', projBid);
   }, [activeProjectId, activeLocationId, activeDeviceId, projects]);
 
-  // Auto-connect: when the user selects a device that isn't already connected,
-  // kick off the connection via its available method automatically.
-  // Modbus/IP devices: call handleConnectDevice.
-  // Datakom cloud devices: DatakomDeviceLive handles the live feed itself, so
-  // no explicit connect call is needed for those.
-  useEffect(() => {
-    if (!activeDeviceId) return;
-    if (autoConnectedRef.current.has(activeDeviceId)) return;
-    if (!hasPermission('device.connect') || !canUseElement('device.connect')) return;
+  // NO auto-connect: the IP (Modbus) connection is opened ONLY when the user
+  // presses Connect. Selecting a device never dials it on its own — the user
+  // is fully in control of both connections.
 
-    // Find the device in the tree or flat list.
-    let found = null;
-    const walk = (locs) => {
-      for (const l of locs || []) {
-        if (found) return;
-        const d = (l.devices || []).find((x) => x.id === activeDeviceId);
-        if (d) { found = d; return; }
-        if (l.children) walk(l.children);
-      }
-    };
-    for (const p of projects) { walk(p.locations); if (found) break; }
-    if (!found) found = flatDevices.find((d) => d.id === activeDeviceId) ?? null;
-    if (!found) return;
-
-    // Mark attempted regardless of path so we don't loop.
-    autoConnectedRef.current.add(activeDeviceId);
-
-    // Already connected — nothing to do.
-    if (connectedDeviceIds.has(found.id)) return;
-
-    // Datakom cloud devices show live readings via DatakomDeviceLive automatically.
-    // Exception: if the device ALSO has a valid IP, try Modbus/IP first so the
-    // user gets the richer connected state; if IP fails, handleConnectDevice will
-    // automatically fall back to the cloud panel (via connectionFallback).
-    if (connMethodOf(found) !== 'modbus' && !isIpv4(found.ip)) return;
-
-    handleConnectDevice(found);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDeviceId, projects, flatDevices]);
-
+  // Resolve the current selection ANYWHERE in the tree — nested sub-locations
+  // included (the synced Datakom tree nests deeply). Priority: device hit wins,
+  // then the active location, then the active project.
   const selection = useMemo(() => {
-    for (const project of projects) {
-      for (const location of project.locations) {
-        for (const device of location.devices) {
-          if (device.id === activeDeviceId) return { project, location, device };
-        }
-        if (location.id === activeLocationId) return { project, location, device: null };
+    const findDevice = (project, locs) => {
+      for (const location of locs || []) {
+        const device = (location.devices || []).find((d) => d.id === activeDeviceId);
+        if (device) return { project, location, device };
+        const nested = findDevice(project, location.children);
+        if (nested) return nested;
       }
-      if (project.id === activeProjectId) return { project, location: null, device: null };
+      return null;
+    };
+    const findLocation = (project, locs) => {
+      for (const location of locs || []) {
+        if (location.id === activeLocationId) return { project, location, device: null };
+        const nested = findLocation(project, location.children);
+        if (nested) return nested;
+      }
+      return null;
+    };
+    if (activeDeviceId) {
+      for (const project of projects) {
+        const hit = findDevice(project, project.locations);
+        if (hit) return hit;
+      }
     }
-    return { project: null, location: null, device: null };
+    if (activeLocationId) {
+      for (const project of projects) {
+        const hit = findLocation(project, project.locations);
+        if (hit) return hit;
+      }
+    }
+    const project = projects.find((p) => p.id === activeProjectId) ?? null;
+    return { project, location: null, device: null };
   }, [projects, activeProjectId, activeLocationId, activeDeviceId]);
 
   // Selected device in flat mode (no project/location wrapper).
@@ -736,14 +667,24 @@ const [locationInputs, setLocationInputs] = useState({});
     [flatDevices, activeDeviceId]
   );
 
-  // ── Merged sidebar (DB projects + read-only Datakom Rainbow tree) ─────────
-  // The Datakom project is appended so both live in one sidebar. Its nodes carry
-  // 'dk-' ids and the project is flagged readOnly, so ProjectsSidebar hides all
-  // create/edit/delete controls on it while keeping DB projects editable.
-  const sidebarProjects = useMemo(() => {
-    const nested = nestByParent(projects);
-    return datakomProjects.length ? [...nested, ...datakomProjects] : nested;
-  }, [projects, datakomProjects]);
+  // ── Sidebar tree (DB projects only — Datakom rows are synced into the DB) ──
+  const sidebarProjects = useMemo(() => nestByParent(projects), [projects]);
+
+  // Flat list of EVERY location (nested included) with a breadcrumb label —
+  // offered as the "Location" dropdown in the device edit form so a device can
+  // be moved to any location in any project.
+  const locationOptions = useMemo(() => {
+    const out = [];
+    const walk = (locs, prefix) => {
+      for (const l of locs || []) {
+        const label = `${prefix} / ${l.name}`;
+        if (l.backendId != null) out.push({ backendId: l.backendId, label });
+        walk(l.children, label);
+      }
+    };
+    for (const p of projects) walk(p.locations, p.name);
+    return out;
+  }, [projects]);
 
   // Flat list of DB projects offered as container targets in the project edit
   // form (value = backend id). Datakom projects can't be containers.
@@ -753,104 +694,6 @@ const [locationInputs, setLocationInputs] = useState({});
       .map((p) => ({ backendId: p.backendId, name: p.name })),
     [projects]
   );
-
-  // Union the Datakom "online" leaf ids into the connected set so their status
-  // dots light up. DB connect state is untouched (still `connectedDeviceIds`).
-  const sidebarConnectedIds = useMemo(() => {
-    if (!datakomOnline.size) return connectedDeviceIds;
-    const s = new Set(connectedDeviceIds);
-    for (const id of datakomOnline) s.add(id);
-    return s;
-  }, [connectedDeviceIds, datakomOnline]);
-
-  // Cloud devices carry no DB status, so the "hide offline devices" setting must
-  // not hide them — always show 'dk-' nodes, defer to the DB rule otherwise.
-  const sidebarShouldShowDevice = (d) =>
-    (String(d.id).startsWith('dk-') ? true : shouldShowDevice(d));
-
-  // Is the current selection inside the merged Datakom tree? (device, node, or
-  // the synthetic root project). Drives whether the main panel shows the live
-  // cloud reading instead of the DB device/connect panel.
-  const isDatakomActive =
-    canReadDatakom && (
-      (activeDeviceId != null && String(activeDeviceId).startsWith('dk-')) ||
-      (activeLocationId != null && String(activeLocationId).startsWith('dk-')) ||
-      // Each Datakom root node is now its own top-level project (id 'dk-node-…').
-      (activeProjectId != null && String(activeProjectId).startsWith('dk-'))
-    );
-  const selectedDatakomDevice = activeDeviceId ? datakomIndex.get(activeDeviceId) ?? null : null;
-  const selectedDatakomNodeName = useMemo(() => {
-    if (!activeLocationId || !String(activeLocationId).startsWith('dk-')) return null;
-    let found = null;
-    const walk = (locs) => {
-      for (const l of locs || []) {
-        if (l.id === activeLocationId) { found = l.name; return; }
-        walk(l.children);
-        if (found) return;
-      }
-    };
-    // Walk both top-level node-projects and those nested inside container folders.
-    const walkProject = (p) => {
-      walk(p.locations);
-      for (const c of p.childProjects ?? []) walkProject(c);
-    };
-    for (const p of datakomProjects) walkProject(p);
-    return found;
-  }, [activeLocationId, datakomProjects]);
-
-  // ── Cascade: build DB entities by picking from the Datakom Rainbow tree ────
-  // A DB project/location created from a Datakom node remembers that node's id
-  // (`datakomNodeId`), which scopes the child pickers one level down:
-  //   project → its Datakom node's children become location options
-  //   location → its node's children become sub-location options, its node's
-  //              devices become device options (auto-linking datakom_did).
-  // The mapping is also persisted by backend id so it survives a reload (the
-  // tree re-hydrates from the DB, which has no such column).
-  // The actual Datakom node-projects in the { id, name, children } shape the
-  // "link to Datakom" cascade menus expect. Container folders are unwrapped so
-  // the real nodes (not the folders) remain the link targets.
-  const datakomRootNodes = useMemo(() => {
-    const out = [];
-    for (const p of datakomProjects) {
-      if (p.datakomContainer) {
-        for (const child of p.childProjects ?? []) out.push({ id: child.id, name: child.name, children: child.locations });
-      } else {
-        out.push({ id: p.id, name: p.name, children: p.locations });
-      }
-    }
-    return out;
-  }, [datakomProjects]);
-  // Every Datakom device (flat, sorted) — so a NEW device in any location can be
-  // linked to the Datakom server from the add-device form, not only via a
-  // cascade under a Datakom-imported location.
-  const datakomAllDevices = useMemo(
-    () => [...datakomIndex.values()]
-      .map((d) => ({ datakomDid: d.did, name: d.sid || `Device ${d.did}` }))
-      .sort((a, b) => String(a.name).localeCompare(String(b.name))),
-    [datakomIndex]
-  );
-
-  // Every Datakom node (flat, any depth) — so a project/location can be linked to
-  // ANY node, not just the ones scoped under its parent. The user builds their
-  // own tree; the Datakom link is a free-choice organizational tag.
-  const datakomAllNodes = useMemo(() => {
-    const out = [];
-    const walk = (nodes) => {
-      for (const n of nodes || []) { out.push({ id: n.id, name: n.name }); walk(n.children); }
-    };
-    walk(datakomRootNodes);
-    return out;
-  }, [datakomRootNodes]);
-
-  const DK_LINKS_KEY = 'projects-datakom-links';
-  const persistDkLink = (kind, backendId, nodeId) => {
-    if (backendId == null) return;
-    try {
-      const m = JSON.parse(localStorage.getItem(DK_LINKS_KEY) || '{}');
-      m[`${kind}:${backendId}`] = nodeId;
-      localStorage.setItem(DK_LINKS_KEY, JSON.stringify(m));
-    } catch { /* ignore */ }
-  };
 
   // Datakom devices have no IP field of their own, but the full cloud reading
   // carries every reported value — scan it for anything shaped like an IPv4 so
@@ -872,11 +715,9 @@ const [locationInputs, setLocationInputs] = useState({});
   const toggleLocation = (id) =>
     setExpandedLocations((prev) => ({ ...prev, [id]: !prev[id] }));
 
-  // Create a project. `node` = optional Datakom node to link (organizational
-  // tag). Uses the typed name if present, else the node's name. On a backend
-  // rejection (e.g. 409 duplicate name) it surfaces the error and does NOT add a
-  // local-only ghost — that was the cause of "saved locally only" rows that
-  // reappeared then vanished.
+  // Create a project. On a backend rejection (e.g. 409 duplicate name) it
+  // surfaces the error and does NOT add a local-only ghost — that was the cause
+  // of "saved locally only" rows that reappeared then vanished.
   const createProjectLinked = async (node = null) => {
     const name = (projectName.trim() || node?.name || '').trim();
     if (!name) { setBackendError('Enter a project name first.'); return; }
@@ -900,7 +741,6 @@ const [locationInputs, setLocationInputs] = useState({});
 
     const newProject = {
       id: createId(), backendId, name, description: '', locations: [],
-      datakomNodeId: node?.id ?? null,
     };
     setProjects((prev) => [newProject, ...prev]);
     setExpandedProjects((prev) => ({ ...prev, [newProject.id]: true }));
@@ -909,9 +749,28 @@ const [locationInputs, setLocationInputs] = useState({});
     setActiveDeviceId(null);
     setProjectName('');
     setBackendError('');
-    if (node && backendId != null) persistDkLink('p', backendId, node.id);
   };
   const handleCreateProject = (e) => { e?.preventDefault?.(); return createProjectLinked(null); };
+
+  // Create a folder = a container project (no brand). Anything can then be
+  // placed inside it: projects move in via the edit form's "Inside" dropdown
+  // (parent_id), locations/sub-locations nest under locations, and a device's
+  // "folder" is simply the location it belongs to.
+  const handleCreateFolder = async (name) => {
+    const clean = String(name ?? '').trim();
+    if (!clean) return { ok: false, error: 'Folder name required' };
+    try {
+      await projectsApi.create({ name: clean });
+    } catch (err) {
+      return { ok: false, error: err.message || 'Failed to create folder' };
+    }
+    reloadTree();
+    return { ok: true };
+  };
+
+  // NB: to use the same physical device in another project, just add a device
+  // there with the same DID/IP — each row keeps its own DB id. No special
+  // duplicate action; the backend deliberately allows many rows per did/IP.
 
   // Link (or unlink) the OPEN add-device draft to a Datakom device by did. Keeps
   // whatever the user already typed; fills name/GPS/IP from the cloud only where
@@ -973,14 +832,13 @@ const [locationInputs, setLocationInputs] = useState({});
       backendId = found?.id ?? found?.ID ?? null;
     } catch { /* keep null */ }
 
-    const location = { id: createId(), backendId, name, description: '', address: '', devices: [], children: [], datakomNodeId: node?.id ?? null };
+    const location = { id: createId(), backendId, name, description: '', address: '', devices: [], children: [] };
     setProjects((prev) =>
       prev.map((p) => (p.id === projectId ? { ...p, locations: [...p.locations, location] } : p))
     );
     setExpandedLocations((prev) => ({ ...prev, [location.id]: true }));
     setLocationInputs((prev) => ({ ...prev, [projectId]: '' }));
     setBackendError('');
-    if (node && backendId != null) persistDkLink('l', backendId, node.id);
   };
   const handleCreateLocation = (projectId) => createLocationLinked(projectId, null);
 
@@ -1024,7 +882,6 @@ const [locationInputs, setLocationInputs] = useState({});
       parentId: parentLocationId,
       depth: (parentLocation?.depth || 1) + 1,
       path: `${parentLocation?.path || ''}/${name}`,
-      datakomNodeId: node?.id ?? null,
     };
     setProjects((prev) =>
       prev.map((p) => (p.id !== projectId ? p : { ...p, locations: addSubLocationToParent(p.locations, parentLocationId, newSubLocation) }))
@@ -1032,7 +889,6 @@ const [locationInputs, setLocationInputs] = useState({});
     setExpandedLocations((prev) => ({ ...prev, [newSubLocation.id]: true }));
     setSubLocationInputs((prev) => ({ ...prev, [parentLocationId]: '' }));
     setBackendError('');
-    if (node && backendId != null) persistDkLink('l', backendId, node.id);
   };
   const handleCreateSubLocation = (projectId, parentLocationId) => createSubLocationLinked(projectId, parentLocationId, null);
 
@@ -1129,19 +985,22 @@ const [locationInputs, setLocationInputs] = useState({});
     const description = String(input.description ?? '').trim();
     const { latitude, longitude } = parseCoords(input.latitude, input.longitude);
     const brandId = input.brandId === '' || input.brandId == null ? null : Number(input.brandId);
-    // Datakom devices are read from the cloud, not Modbus — no IP needed. A
-    // device picked from Datakom Rainbow carries a datakom_did link; a device
-    // whose brand is "Datakom" also counts. connType='datakom' explicitly skips IP.
-    const connType = input.connType ?? 'modbus';
+    // Cloud link is decided by the info itself: a typed DID (or a Datakom-brand
+    // pick) makes the device cloud-linked — no separate mode/step.
     const linkDid = input.datakomDid == null || input.datakomDid === '' ? null : Number(input.datakomDid);
+    const isCloudDraft = linkDid != null || isCloudBrand(brands.find((b) => b.id === brandId)?.name);
 
     const errors = {};
     const ipRe = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
     if (!name) errors.name = 'Name is required';
-    // Modbus/Both require a valid IP. A Datakom (cloud) device may have no IP, but
-    // if one is typed it must be valid — adding it flips the device to IP method.
-    if (connType !== 'datakom' && !ip.match(ipRe)) errors.ip = 'Valid IP required';
-    if (connType === 'datakom' && ip && !ip.match(ipRe)) errors.ip = 'Enter a valid IP or leave blank';
+    // A device needs at least one identifier: a valid IP (Modbus) or a DID /
+    // cloud brand (Datakom). A typed IP must always be valid.
+    if (!isCloudDraft && !ip.match(ipRe)) errors.ip = 'Valid IP required (or add a Datakom DID)';
+    if (isCloudDraft && ip && !ip.match(ipRe)) errors.ip = 'Enter a valid IP or leave blank';
+    // Typed DID must be a number (it's how the cloud link is made).
+    if (input.datakomDid != null && input.datakomDid !== '' && !Number.isInteger(linkDid)) {
+      errors.name = 'Datakom DID must be a number';
+    }
     if (!Number.isInteger(portValue) || portValue < 1 || portValue > 65535) {
       errors.port = 'Valid port (1-65535) required';
     }
@@ -1252,44 +1111,6 @@ const [locationInputs, setLocationInputs] = useState({});
   const handleUpdateProject = async (projectId, draft) => {
     const name = String(draft.name ?? '').trim();
     if (!name) return { ok: false, error: 'Name is required' };
-    // Datakom container folder: renaming it reassigns every member node to the
-    // new container name (the name IS the grouping key).
-    if (String(projectId).startsWith('dk-container-')) {
-      const cont = datakomProjects.find((p) => p.id === projectId);
-      const members = cont?.childProjects ?? [];
-      try {
-        await Promise.all(members.map((m) => datakomApi.setNodeContainer(m.id, name)));
-        setDatakomNodeContainers((prev) => {
-          const next = { ...prev };
-          for (const m of members) next[m.id] = name;
-          return next;
-        });
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err.message || 'Rename failed' };
-      }
-    }
-    // Datakom Rainbow node (read-only cloud): store a local name override, and
-    // optionally its container assignment. `draft.datakomContainer` present =
-    // move it into (or, if empty, out of) a container folder.
-    if (String(projectId).startsWith('dk-')) {
-      try {
-        await datakomApi.setNodeName(projectId, name);
-        setDatakomNodeNames((prev) => ({ ...prev, [projectId]: name }));
-        if (Object.prototype.hasOwnProperty.call(draft, 'datakomContainer')) {
-          const c = String(draft.datakomContainer ?? '').trim();
-          await datakomApi.setNodeContainer(projectId, c);
-          setDatakomNodeContainers((prev) => {
-            const next = { ...prev };
-            if (c) next[projectId] = c; else delete next[projectId];
-            return next;
-          });
-        }
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err.message || 'Rename failed' };
-      }
-    }
     const project = projects.find((p) => p.id === projectId);
     const movingContainer = Object.prototype.hasOwnProperty.call(draft, 'parentId');
     const newParentId = movingContainer
@@ -1313,18 +1134,6 @@ const [locationInputs, setLocationInputs] = useState({});
   const handleUpdateLocation = async (projectId, locationId, draft) => {
     const name = String(draft.name ?? '').trim();
     if (!name) return { ok: false, error: 'Name is required' };
-
-    // Datakom cloud node (read-only tree): the name can't change on Datakom's
-    // side, so store a local display-name override instead of a DB update.
-    if (String(locationId).startsWith('dk-node-')) {
-      try {
-        await datakomApi.setNodeName(locationId, name);
-        setDatakomNodeNames((prev) => ({ ...prev, [locationId]: name }));
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err.message || 'Rename failed' };
-      }
-    }
 
     // Find the location (top level or nested) to get its backendId.
     const findLoc = (locs) => {
@@ -1696,24 +1505,20 @@ const [locationInputs, setLocationInputs] = useState({});
         </div>
       )}
 
-      {/* Flat mode (device.read without project.read): a plain device list, with
-          the standalone Datakom Rainbow tree appended for cloud-capable users. */}
+      {/* Flat mode (device.read without project.read): a plain device list. */}
       {flatMode && (
-        <>
-          <FlatDeviceView
-            devices={flatDevices.filter(shouldShowDevice)}
-            activeDeviceId={activeDeviceId}
-            setActiveDeviceId={setActiveDeviceId}
-            selectedDevice={flatSelectedDevice}
-            connectedDeviceIds={connectedDeviceIds}
-            connectingDeviceId={connectingDeviceId}
-            deviceConnectionErrors={deviceConnectionErrors}
-            onConnect={handleConnectDevice}
-            onDisconnect={handleDisconnectDevice}
-            canConnect={hasPermission('device.connect') && canUseElement('device.connect')}
-          />
-          {canReadDatakom && <DatakomProjectTree />}
-        </>
+        <FlatDeviceView
+          devices={flatDevices.filter(shouldShowDevice)}
+          activeDeviceId={activeDeviceId}
+          setActiveDeviceId={setActiveDeviceId}
+          selectedDevice={flatSelectedDevice}
+          connectedDeviceIds={connectedDeviceIds}
+          connectingDeviceId={connectingDeviceId}
+          deviceConnectionErrors={deviceConnectionErrors}
+          onConnect={handleConnectDevice}
+          onDisconnect={handleDisconnectDevice}
+          canConnect={hasPermission('device.connect') && canUseElement('device.connect')}
+        />
       )}
 
       {!flatMode && (
@@ -1723,14 +1528,10 @@ const [locationInputs, setLocationInputs] = useState({});
           projects={sidebarProjects}
           // Candidate containers for the project edit form's "inside" dropdown.
           projectContainerOptions={projectContainerOptions}
-          // Datakom nodes (read-only cloud) can still be renamed locally by
-          // datakom.write holders; the sidebar shows a pencil on those nodes.
-          allowLocationRename
-          // Datakom folders: existing folder names for the move dropdown, and
-          // the create-folder handler behind the "New folder" button.
-          datakomFolderOptions={datakomFolderOptions}
-          onCreateDatakomFolder={handleCreateDatakomFolder}
-          shouldShowDevice={sidebarShouldShowDevice}
+          // "New folder" header button — creates a container project (anything
+          // can then be moved inside it via parent_id / location_id).
+          onCreateFolder={handleCreateFolder}
+          shouldShowDevice={shouldShowDevice}
           projectName={projectName}
           setProjectName={setProjectName}
           onCreateProject={handleCreateProject}
@@ -1753,7 +1554,7 @@ const [locationInputs, setLocationInputs] = useState({});
           onUpdateProject={handleUpdateProject}
           onUpdateLocation={handleUpdateLocation}
           onUpdateDevice={handleUpdateDevice}
-          connectedDeviceIds={sidebarConnectedIds}
+          connectedDeviceIds={connectedDeviceIds}
           addingDeviceFor={addingDeviceFor}
           startAddDevice={startAddDevice}
           cancelAddDevice={cancelAddDevice}
@@ -1767,15 +1568,10 @@ const [locationInputs, setLocationInputs] = useState({});
           setSubLocationInputs={setSubLocationInputs}
           alarmsMap={alarmsMap}
           onAcceptAlarm={handleAcceptAlarm}
-          /* Link to the Datakom Rainbow tree at each create level — free choice,
-             not bound to the Datakom structure. Name comes from the user. */
+          /* Datakom integration is now limited to linking a device draft to a
+             cloud did — the tree itself is synced into the DB by the backend. */
           datakom={{
-            rootNodes: datakomRootNodes,   // Datakom "projects" (for the project menu)
-            allNodes: datakomAllNodes,     // every node (for location / sub-location menus)
-            allDevices: datakomAllDevices, // every device (for the device link dropdown)
-            onCreateProject: createProjectLinked,        // (node|null)
-            onCreateLocation: createLocationLinked,      // (projectId, node|null)
-            onCreateSubLocation: createSubLocationLinked,// (projectId, parentId, node|null)
+            allDevices: datakomAllDevices, // every cloud device (for the link dropdown)
             onLinkDeviceDraft: linkDraftToDatakom,
           }}
         />
@@ -1783,13 +1579,8 @@ const [locationInputs, setLocationInputs] = useState({});
         {/* Main panel */}
         <section className="lg:col-span-3 card p-6 min-h-[400px]">
 
-          {/* Datakom Rainbow selection (read-only cloud device / node) */}
-          {isDatakomActive && (
-            <DatakomSelectionPanel device={selectedDatakomDevice} nodeName={selectedDatakomNodeName} />
-          )}
-
           {/* Empty state */}
-          {!selection.project && !isDatakomActive && (
+          {!selection.project && (
             <div className="flex flex-col items-center justify-center h-full py-16 text-center">
               <div className="w-16 h-16 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-4">
                 <svg className="w-8 h-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1845,10 +1636,11 @@ const [locationInputs, setLocationInputs] = useState({});
                     const isConnected = connectedDeviceIds.has(device.id);
                     const isBusy = connectingDeviceId === device.id;
                     const connErr = deviceConnectionErrors[device.id];
-                    // One method, decided by the identifier: an IP → Modbus/IP, else
-                    // a Datakom DID (or Datacom brand) → Datakom Cloud. Same rule as
-                    // the Details panel and edit chip.
-                    const cardConnType = connMethodOf(device);
+                    // A device can carry BOTH connections: a valid IP (Modbus) and a
+                    // Datakom DID / cloud brand (Rainbow cloud). Both badges show;
+                    // the Connect button applies to the IP connection only.
+                    const cardHasIp = isIpv4(device.ip);
+                    const cardHasCloud = device.datakomDid != null || isCloudBrand(device.brandName);
                     return (
                       <div
                         key={device.id}
@@ -1880,7 +1672,7 @@ const [locationInputs, setLocationInputs] = useState({});
                               {device.brandName}
                             </span>
                           )}
-                          {cardConnType === 'modbus' && (
+                          {cardHasIp && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                               <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
@@ -1888,7 +1680,7 @@ const [locationInputs, setLocationInputs] = useState({});
                               Modbus / IP
                             </span>
                           )}
-                          {cardConnType === 'datakom' && (
+                          {cardHasCloud && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20">
                               <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -1917,27 +1709,32 @@ const [locationInputs, setLocationInputs] = useState({});
                           >
                             Details
                           </button>
-                          <Can feature="button.device.connect" element="device.connect">
-                            {isConnected ? (
-                              <button
-                                type="button"
-                                onClick={() => handleDisconnectDevice(device.id)}
-                                disabled={isBusy}
-                                className="px-3 py-2 text-xs font-semibold rounded-xl bg-red-600/80 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
-                              >
-                                {isBusy ? '…' : 'Disconnect'}
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleConnectDevice(device)}
-                                disabled={isBusy}
-                                className="px-3 py-2 text-xs font-semibold rounded-xl bg-emerald-600/80 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-                              >
-                                {isBusy ? '…' : 'Connect'}
-                              </button>
-                            )}
-                          </Can>
+                          {/* Connect/Disconnect drives the IP (Modbus) connection
+                              ONLY — and only while IP is this device's chosen
+                              connection. Cloud is automatic, no button. */}
+                          {cardHasIp && prefOf(device) === 'ip' && (
+                            <Can feature="button.device.connect" element="device.connect">
+                              {isConnected ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDisconnectDevice(device.id)}
+                                  disabled={isBusy}
+                                  className="px-3 py-2 text-xs font-semibold rounded-xl bg-red-600/80 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+                                >
+                                  {isBusy ? '…' : 'Disconnect'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleConnectDevice(device)}
+                                  disabled={isBusy}
+                                  className="px-3 py-2 text-xs font-semibold rounded-xl bg-emerald-600/80 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                                >
+                                  {isBusy ? '…' : 'Connect'}
+                                </button>
+                              )}
+                            </Can>
+                          )}
                         </div>
                       </div>
                     );
@@ -1972,25 +1769,30 @@ const [locationInputs, setLocationInputs] = useState({});
                     )}
                   </div>
 
-                  <Can feature="button.device.connect" element="device.connect">
-                    {connectedDeviceIds.has(selection.device.id) ? (
-                      <button
-                        onClick={() => handleDisconnectDevice(selection.device.id)}
-                        disabled={connectingDeviceId === selection.device.id}
-                        className="flex-shrink-0 px-4 py-2 rounded-xl bg-red-600/80 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50 transition-colors"
-                      >
-                        {connectingDeviceId === selection.device.id ? 'Disconnecting…' : 'Disconnect'}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleConnectDevice(selection.device)}
-                        disabled={connectingDeviceId === selection.device.id}
-                        className="flex-shrink-0 px-4 py-2 rounded-xl bg-emerald-600/80 text-white text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-                      >
-                        {connectingDeviceId === selection.device.id ? 'Connecting…' : 'Connect'}
-                      </button>
-                    )}
-                  </Can>
+                  {/* Connect/Disconnect controls the IP (Modbus) connection ONLY,
+                      and only shows while the IP connection is the chosen one.
+                      Cloud data streams automatically — no button for it. */}
+                  {isIpv4(selection.device.ip) && prefOf(selection.device) === 'ip' && (
+                    <Can feature="button.device.connect" element="device.connect">
+                      {connectedDeviceIds.has(selection.device.id) ? (
+                        <button
+                          onClick={() => handleDisconnectDevice(selection.device.id)}
+                          disabled={connectingDeviceId === selection.device.id}
+                          className="flex-shrink-0 px-4 py-2 rounded-xl bg-red-600/80 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50 transition-colors"
+                        >
+                          {connectingDeviceId === selection.device.id ? 'Disconnecting…' : 'Disconnect'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleConnectDevice(selection.device)}
+                          disabled={connectingDeviceId === selection.device.id}
+                          className="flex-shrink-0 px-4 py-2 rounded-xl bg-emerald-600/80 text-white text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                        >
+                          {connectingDeviceId === selection.device.id ? 'Connecting…' : 'Connect'}
+                        </button>
+                      )}
+                    </Can>
+                  )}
                 </div>
 
                 {deviceConnectionErrors[selection.device.id] && (
@@ -2007,44 +1809,86 @@ const [locationInputs, setLocationInputs] = useState({});
               {/* Location */}
               <DeviceLocationCard device={selection.device} />
 
-              {/* ── Active connection method ── */}
-              {/* Primary method is decided by the identifier the device carries.
-                  If the primary method failed and a fallback is available
-                  (connectionFallback[id] === 'cloud'), the cloud panel is shown
-                  instead with a banner explaining the switch. */}
+              {/* ── Connections ── */}
+              {/* A device can carry BOTH connections and shows both at once:
+                  - IP (Modbus): gauge + start/stop controls, driven by the
+                    Connect button above. IP-only.
+                  - Datakom cloud: live reading panel, streams automatically —
+                    no connect button and no controls. */}
               {(() => {
-                const effectiveMethod =
-                  connectionFallback[selection.device.id] === 'cloud'
-                    ? 'datakom'
-                    : connMethodOf(selection.device);
-                return effectiveMethod === 'datakom' ? (
+                const dev = selection.device;
+                const hasIp = isIpv4(dev.ip);
+                const hasCloud = dev.datakomDid != null || isCloudBrand(dev.brandName);
+                const fellBack = connectionFallback[dev.id] === 'cloud';
+                // The USER picks which connection is active (segmented control
+                // below); only the chosen one renders/streams. An IP failure
+                // with a cloud link still auto-falls back to cloud.
+                const active = fellBack ? 'cloud' : prefOf(dev);
+                const ipConnected = connectedDeviceIds.has(dev.id);
+                return (
                   <div className="space-y-4">
-                    {connectionFallback[selection.device.id] === 'cloud' && (
+                    {/* Connection switcher — only when the device has BOTH */}
+                    {hasIp && hasCloud && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="inline-flex rounded-xl bg-[#0f1117] border border-white/10 p-1">
+                          <button
+                            type="button"
+                            onClick={() => setDevicePref(dev, 'ip')}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors
+                              ${active === 'ip' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${ipConnected ? 'bg-emerald-400 animate-pulse' : active === 'ip' ? 'bg-white/60' : 'bg-gray-600'}`} />
+                            Modbus / IP
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDevicePref(dev, 'cloud')}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors
+                              ${active === 'cloud' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${active === 'cloud' ? 'bg-white/60' : 'bg-gray-600'}`} />
+                            Datakom Cloud
+                          </button>
+                        </div>
+                        <span className="text-[11px] text-gray-600">
+                          {active === 'ip'
+                            ? (ipConnected ? 'IP connection active.' : 'IP selected — press Connect to go online.')
+                            : 'Cloud data streams automatically while the Datakom connection is on.'}
+                        </span>
+                      </div>
+                    )}
+
+                    {fellBack && (
                       <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
                         <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                         </svg>
-                        IP unreachable — switched to Datakom cloud automatically.
+                        IP unreachable — showing Datakom cloud data instead.
                       </div>
                     )}
-                    {selection.device.datakomDid != null ? (
-                      <DatakomDeviceLive
-                        did={selection.device.datakomDid}
-                        deviceId={selection.device.backendId}
-                        deviceIp={selection.device.ip}
-                        onSyncIp={(ip) => syncDeviceIpFromCloud(selection.device, ip)}
-                        onUnlink={() => handleLinkDatakom(selection.device, null)}
-                      />
-                    ) : (
-                      <DatakomLinkCard onLink={(did) => handleLinkDatakom(selection.device, did)} />
+
+                    {/* ACTIVE connection only */}
+                    {active === 'ip' && hasIp && (
+                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        <FuelGauge isConnected={ipConnected}
+                          target={{ deviceId: dev.backendId, ip: dev.ip, port: dev.port }} />
+                        <ControlButtons isConnected={ipConnected}
+                          target={{ deviceId: dev.backendId, ip: dev.ip, port: dev.port }} />
+                      </div>
                     )}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    <FuelGauge isConnected={connectedDeviceIds.has(selection.device.id)}
-                      target={{ deviceId: selection.device.backendId, ip: selection.device.ip, port: selection.device.port }} />
-                    <ControlButtons isConnected={connectedDeviceIds.has(selection.device.id)}
-                      target={{ deviceId: selection.device.backendId, ip: selection.device.ip, port: selection.device.port }} />
+
+                    {active === 'cloud' && (
+                      dev.datakomDid != null ? (
+                        <DatakomDeviceLive
+                          did={dev.datakomDid}
+                          deviceId={dev.backendId}
+                          deviceIp={dev.ip}
+                          onSyncIp={(ip) => syncDeviceIpFromCloud(dev, ip)}
+                        />
+                      ) : (
+                        <DatakomLinkCard onLink={(did) => handleLinkDatakom(dev, did)} />
+                      )
+                    )}
                   </div>
                 );
               })()}
@@ -2058,49 +1902,6 @@ const [locationInputs, setLocationInputs] = useState({});
   );
 }
 
-// ── Datakom Rainbow main-panel content ────────────────────────────────────
-// Shown when the merged sidebar's read-only Datakom node/device is selected.
-// A device shows its live cloud reading; a node (or the root) shows a hint.
-function DatakomSelectionPanel({ device, nodeName }) {
-  if (device) {
-    const name = device.sid || `Device ${device.did}`;
-    return (
-      <div>
-        <div className="flex items-center gap-2 text-xs text-gray-600 mb-1">
-          <span>Datakom Rainbow</span>
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-          <span>{name}</span>
-        </div>
-        <h2 className="text-xl font-bold text-gray-100 mb-1">{name}</h2>
-        <p className="text-xs text-gray-500 mb-5 tabular-nums">
-          did {device.did}
-          {device.esn ? ` · esn ${device.esn}` : ''}
-          {device.online ? ' · live' : ' · no reading yet'}
-        </p>
-        <div className="max-w-md">
-          <DatakomDeviceLive did={device.did} />
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col items-center justify-center h-full py-16 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-orange-500/10 text-orange-400 flex items-center justify-center mb-4">
-        <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-      </div>
-      <h1 className="text-xl font-bold text-gray-200 mb-2">{nodeName || 'Datakom Rainbow'}</h1>
-      <p className="text-gray-500 text-sm max-w-sm leading-relaxed">
-        {nodeName
-          ? 'Select a device in this node to see its live reading.'
-          : 'Live device tree from Datakom’s cloud portal. Pick a device in the sidebar to view its fuel and live values.'}
-      </p>
-    </div>
-  );
-}
 
 // Device location card — shows the device's GPS coordinates and links to the
 // map (focused on this device) to view or set them.

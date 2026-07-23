@@ -6,6 +6,7 @@ import { useTelemetry } from '../hooks/useTelemetry.js';
 import { projectsApi } from '../api/projects.js';
 import { datakomApi } from '../api/datakom.js';
 import DeviceMap from '../components/DeviceMap.jsx';
+import { dedupeByConnection } from '../lib/dedupeDevices.js';
 import Editable from '../components/pageedit/Editable.jsx';
 import { motion } from 'framer-motion';
 import { silk } from '../lib/motion.js';
@@ -25,6 +26,7 @@ function normalizeDevice(d) {
     ip: d.ip ?? d.IP,
     port: d.port ?? d.PORT,
     status: (d.status ?? d.STATUS ?? 'offline').toString().toLowerCase(),
+    locationId: num(d.location_id ?? d.LOCATION_ID),
     latitude: num(d.latitude ?? d.LATITUDE),
     longitude: num(d.longitude ?? d.LONGITUDE),
     altitude: num(d.altitude ?? d.ALTITUDE),
@@ -363,7 +365,10 @@ export default function Dashboard() {
       .getDevices()
       .then(async (rows) => {
         if (cancelled) return;
-        const normalized = (rows ?? []).map(normalizeDevice);
+        // ONE entry per physical device: rows sharing a Datakom did or IP:port
+        // (a device reused across projects, or one with both connection
+        // methods) collapse into a single device for every dashboard stat.
+        const normalized = dedupeByConnection((rows ?? []).map(normalizeDevice));
         // Overlay live Datakom status for any device linked to a Datakom cloud device.
         try {
           const st = await datakomApi.status();

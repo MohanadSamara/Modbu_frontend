@@ -50,6 +50,23 @@ export const datakomApi = {
       prefix: 'Failed to save container',
     }),
 
+  // ── Adapter runtime control (Datakom connection page) ───────────────────
+  // Start/stop the backend's cloud WebSocket connection at runtime. The
+  // enabled flag persists across restarts (system_settings). datakom.write.
+  adapterStart: () =>
+    request('/brands/datakom/adapter/start', { method: 'POST', timeoutMs: 15000, prefix: 'Failed to start Datakom connection' }),
+  adapterStop: () =>
+    request('/brands/datakom/adapter/stop', { method: 'POST', timeoutMs: 15000, prefix: 'Failed to stop Datakom connection' }),
+  adapterRestart: () =>
+    request('/brands/datakom/adapter/restart', { method: 'POST', timeoutMs: 15000, prefix: 'Failed to restart Datakom connection' }),
+
+  // ── Cloud→DB sync ───────────────────────────────────────────────────────
+  // Import the cloud tree as editable projects/locations/devices rows.
+  sync: () =>
+    request('/brands/datakom/sync', { method: 'POST', timeoutMs: 60000, prefix: 'Datakom sync failed' }),
+  syncStatus: () =>
+    request('/brands/datakom/sync/status', { prefix: 'Failed to fetch sync status' }),
+
   // ── Cloud control (SCAFFOLD) ────────────────────────────────────────────
   // Remote start/stop over Datakom's cloud. Wired end-to-end but the backend
   // stays inert (HTTP 501, code CONTROL_NOT_CONFIGURED) until the Rainbow

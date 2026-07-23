@@ -4,6 +4,7 @@ import Layout from './components/Layout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import DeviceConnections from './pages/DeviceConnections.jsx';
+import DatakomConnection from './pages/DatakomConnection.jsx';
 import Brands from './pages/Brands.jsx';
 import Alarms from './pages/Alarms.jsx';
 import FuelLevels from './pages/FuelLevels.jsx';
@@ -66,6 +67,16 @@ function App() {
                 element={
                   <ProtectedRoute requiredPermission="device.read">
                     <Brands />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Datakom cloud connection control (status for datakom.read /
+                  device.read; the control buttons need datakom.write). */}
+              <Route
+                path="datakom"
+                element={
+                  <ProtectedRoute requiredAnyPermission={['datakom.read', 'device.read']}>
+                    <DatakomConnection />
                   </ProtectedRoute>
                 }
               />

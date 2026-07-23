@@ -104,12 +104,24 @@ export default function DatakomDeviceLive({ did, deviceId, deviceIp, onSyncIp, o
 
   // Light poll for the cloud-reported IP + genset state — powers the IP auto-fill
   // and the control row. Independent of the gauge's own faster poll.
+  // `cloudDown` flips when the backend refuses the reading (503 = the Datakom
+  // connection is stopped/disconnected) so the panel says so instead of showing
+  // a frozen "live" gauge.
   const [info, setInfo] = useState({ ip: null, gensetState: null });
+  const [cloudDown, setCloudDown] = useState(false);
   useEffect(() => {
     let c = false;
     const tick = () => datakomApi.device(did)
-      .then((d) => { if (!c) setInfo({ ip: d?.reading?.ip ?? null, gensetState: d?.reading?.identity?.gensetState ?? null }); })
-      .catch(() => {});
+      .then((d) => {
+        if (c) return;
+        setCloudDown(false);
+        setInfo({ ip: d?.reading?.ip ?? null, gensetState: d?.reading?.identity?.gensetState ?? null });
+      })
+      .catch((e) => {
+        if (c) return;
+        // 503 = adapter stopped / not connected; other errors keep last state.
+        if (/503|not connected/i.test(String(e?.message))) setCloudDown(true);
+      });
     tick();
     const t = setInterval(tick, 5000);
     return () => { c = true; clearInterval(t); };
@@ -191,83 +203,39 @@ export default function DatakomDeviceLive({ did, deviceId, deviceIp, onSyncIp, o
         </Can>
       )}
 
-      {/* Same gauge + alarm logic as the Modbus side, fed from Datakom and polled
-          faster for a snappier read. deviceId ties the accept/snooze to this same
-          platform device, so an accept here is respected on the Modbus panel too. */}
-      <FuelGauge
-        isConnected
-        target={{ deviceId }}
-        fuelSource={fuelSource}
-        pollMs={1000}
-      />
-
-      {/* Remote start/stop over the Datakom Rainbow cloud path. */}
-      <DatakomCloudControl did={did} deviceId={deviceId} state={info.gensetState} />
+      {cloudDown ? (
+        /* The Datakom connection is stopped — say so instead of a frozen gauge. */
+        <div className="flex items-center gap-2 px-3 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m-12.728 0a9 9 0 010-12.728m3.536 3.536L18.364 18.364M5.636 5.636l3.536 3.536" />
+          </svg>
+          Datakom cloud connection is off — no live data. Start it from the Datakom Cloud page.
+        </div>
+      ) : (
+        <>
+          {/* Same gauge + alarm logic as the Modbus side, fed from Datakom and polled
+              faster for a snappier read. deviceId ties the accept/snooze to this same
+              platform device, so an accept here is respected on the Modbus panel too.
+              NO control buttons here — the cloud is read-only; start/stop is
+              Modbus/IP-only. */}
+          <FuelGauge
+            isConnected
+            target={{ deviceId }}
+            fuelSource={fuelSource}
+            pollMs={1000}
+          />
+          {info.gensetState && (
+            <p className="px-1 text-[11px] text-gray-500">
+              State <span className="font-mono text-gray-300">{info.gensetState}</span>
+            </p>
+          )}
+        </>
+      )}
     </div>
     </Can>
   );
 }
 
-// Start/Stop a Datakom device over the Rainbow cloud (POST /brands/datakom/
-// device/:did/start|stop). The backend refuses with a clear message until the
-// real Rainbow command frame is configured in datakom-rainbow.js, so pressing a
-// button never sends a guessed frame to a live generator.
-function DatakomCloudControl({ did, deviceId, state }) {
-  const [busy, setBusy] = useState('');
-  const [msg, setMsg] = useState('');
-  const [err, setErr] = useState('');
-
-  const run = async (action) => {
-    setBusy(action); setMsg(''); setErr('');
-    try {
-      const fn = action === 'start' ? datakomApi.start : datakomApi.stop;
-      await fn(did, deviceId);
-      setMsg(`${action === 'start' ? 'Start' : 'Stop'} command sent.`);
-    } catch (e) {
-      setErr(e?.message || `${action} failed`);
-    } finally {
-      setBusy('');
-    }
-  };
-
-  return (
-    <Can anyPermission={['device.start', 'device.stop', 'device.control']}>
-      <div className="rounded-xl bg-[#0f1117] border border-orange-500/15 p-3 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-orange-400/70">
-            Datakom Rainbow control
-          </p>
-          {state && (
-            <span className="text-[11px] text-gray-400">
-              State <span className="font-mono text-gray-200">{state}</span>
-            </span>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Can anyPermission={['device.start', 'device.control']}>
-            <button
-              type="button"
-              onClick={() => run('start')}
-              disabled={!!busy}
-              className="flex-1 py-1.5 rounded-lg bg-emerald-600/80 text-white text-xs font-semibold hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-            >
-              {busy === 'start' ? 'Starting…' : 'Start'}
-            </button>
-          </Can>
-          <Can anyPermission={['device.stop', 'device.control']}>
-            <button
-              type="button"
-              onClick={() => run('stop')}
-              disabled={!!busy}
-              className="flex-1 py-1.5 rounded-lg bg-red-600/80 text-white text-xs font-semibold hover:bg-red-600 disabled:opacity-50 transition-colors"
-            >
-              {busy === 'stop' ? 'Stopping…' : 'Stop'}
-            </button>
-          </Can>
-        </div>
-        {msg && <p className="text-[11px] text-emerald-400">{msg}</p>}
-        {err && <p className="text-[11px] text-amber-400 leading-snug">{err}</p>}
-      </div>
-    </Can>
-  );
-}
+// NB: the old "Datakom Rainbow control" (cloud start/stop) card was removed —
+// remote control over the cloud isn't possible, so control stays Modbus/IP-only
+// via <ControlButtons> on the IP panel.

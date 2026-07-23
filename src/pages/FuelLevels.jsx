@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { modbusApi } from '../api/modbus.js';
 import { datakomApi } from '../api/datakom.js';
+import { dedupeByConnection } from '../lib/dedupeDevices.js';
 import { useTelemetry } from '../hooks/useTelemetry.js';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { defaultSettings } from '../api/settings.js';
@@ -50,30 +51,14 @@ function normalizeDevice(d) {
   };
 }
 
-// Collapse device rows that point at the same physical connection into one:
-// two rows linked to the same Datakom did, or two rows with the same IP:port,
-// are the same device and must render a single card. When rows collide, keep
-// the most useful one — online first, then one assigned to a location, then
-// the most recently added (highest id).
-function dedupeByConnection(list) {
-  const keyOf = (d) =>
-    d.datakomDid != null ? `dk:${d.datakomDid}`
-    : d.ip ? `ip:${d.ip}:${d.port}`
-    : `id:${d.id}`;
-  const score = (d) => (d.status === 'online' ? 4 : 0) + (d.locationId != null ? 2 : 0);
-  const best = new Map();
-  const idsByKey = new Map();
-  for (const d of list) {
-    const k = keyOf(d);
-    if (d.id != null) idsByKey.set(k, [...(idsByKey.get(k) ?? []), d.id]);
-    const cur = best.get(k);
-    if (!cur || score(d) > score(cur) || (score(d) === score(cur) && (d.id ?? 0) > (cur.id ?? 0))) {
-      best.set(k, d);
-    }
-  }
-  // altIds: every device id sharing this connection — live WS frames may arrive
-  // under a hidden duplicate's id, and the surviving card must still pick them up.
-  return [...best.entries()].map(([k, d]) => ({ ...d, altIds: idsByKey.get(k) ?? [] }));
+// Fetch fuel for a set of Datakom-linked rows, hitting the cloud ONCE per
+// distinct did (duplicate rows share the result). Returns [{ id, fuel }].
+async function fetchDatakomFuelForRows(rows) {
+  const dids = [...new Set(rows.map((r) => r.datakomDid))];
+  const byDid = new Map(
+    await Promise.all(dids.map(async (did) => [did, await fetchDatakomFuel(did)]))
+  );
+  return rows.map((r) => ({ id: r.id, fuel: byDid.get(r.datakomDid) ?? null }));
 }
 
 // Fetch the fuel % for a single Datakom device. Returns a number or null.
@@ -269,11 +254,14 @@ export default function FuelLevels() {
       try {
         const devs = await modbusApi.getDevices();
         const list = dedupeByConnection((devs ?? []).map(normalizeDevice));
+        // Datakom-linked rows: one cloud read per distinct did (shared by
+        // duplicate rows). Everything else: a direct Modbus fuel read.
+        const dkRows = list.filter((d) => d.datakomDid != null);
+        const dkFuel = new Map((await fetchDatakomFuelForRows(dkRows)).map((u) => [u.id, u.fuel]));
         const results = await Promise.all(
           list.map((dev) => {
             if (dev.datakomDid != null) {
-              // Datakom-linked device: read fuel from the Datakom cloud.
-              return fetchDatakomFuel(dev.datakomDid).then((fuel) => ({ ...dev, fuel }));
+              return Promise.resolve({ ...dev, fuel: dkFuel.get(dev.id) ?? null });
             }
             return modbusApi
               .getFuel({ deviceId: dev.id })
@@ -338,11 +326,8 @@ export default function FuelLevels() {
       setRows((prev) => {
         const datakomDevs = prev.filter((r) => r.datakomDid != null);
         if (!datakomDevs.length) return prev;
-        Promise.all(
-          datakomDevs.map((dev) =>
-            fetchDatakomFuel(dev.datakomDid).then((fuel) => ({ id: dev.id, fuel }))
-          )
-        ).then((updates) => {
+        // One cloud read per distinct did — duplicate rows share the result.
+        fetchDatakomFuelForRows(datakomDevs).then((updates) => {
           if (cancelled) return;
           setRows((curr) => curr.map((r) => {
             const u = updates.find((x) => x.id === r.id);

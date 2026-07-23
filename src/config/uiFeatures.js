@@ -20,6 +20,7 @@ export const UI_FEATURES = [
   { id: 'nav.brands',      label: 'Brands link',             group: 'Navigation',     defaultPermission: 'device.read' },
   { id: 'nav.events',      label: 'Events link',             group: 'Navigation',     defaultPermission: 'alarm.read' },
   { id: 'nav.settings',    label: 'Settings link',           group: 'Navigation',     defaultPermission: 'settings.read' },
+  { id: 'nav.datakom',     label: 'Datakom Cloud link',      group: 'Navigation',     defaultPermission: 'datakom.read' },
 
   // Administration
   { id: 'nav.users',       label: 'Users link',              group: 'Administration', defaultPermission: 'user.read' },

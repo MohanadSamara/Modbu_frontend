@@ -4,6 +4,7 @@ import { modbusApi } from '../api/modbus.js';
 import { devicesApi } from '../api/projects.js';
 import { useAuth } from '../context/useAuth.js';
 import DeviceMap from '../components/DeviceMap.jsx';
+import { dedupeByConnection } from '../lib/dedupeDevices.js';
 import { SkeletonList } from '../components/Skeleton.jsx';
 import Editable from '../components/pageedit/Editable.jsx';
 
@@ -85,7 +86,8 @@ export default function DeviceMapPage() {
       .getDevices()
       .then((rows) => {
         if (cancelled) return;
-        setDevices((rows ?? []).map(normalizeDevice));
+        // One marker per PHYSICAL device (duplicate rows collapse).
+        setDevices(dedupeByConnection((rows ?? []).map(normalizeDevice)));
         setError('');
       })
       .catch((err) => { if (!cancelled) setError(err.message || 'Failed to load devices'); })

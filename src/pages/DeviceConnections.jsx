@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { modbusApi } from '../api/modbus.js';
 import { brandsApi } from '../api/brands.js';
 import { datakomApi } from '../api/datakom.js';
+import { dedupeByConnection } from '../lib/dedupeDevices.js';
 import { useAuth } from '../context/useAuth.js';
 import { useToast, useConfirm } from '../context/useFeedback.js';
 import { SkeletonTableRows } from '../components/Skeleton.jsx';
@@ -206,7 +207,8 @@ export default function DeviceConnections() {
       .getDevices()
       .then(async (rows) => {
         if (cancelled) return;
-        const normalized = (rows ?? []).map(normalizeDevice);
+        // One row per PHYSICAL device (rows sharing a did / IP:port collapse).
+        const normalized = dedupeByConnection((rows ?? []).map(normalizeDevice));
         const merged = await mergeDatakomStatus(normalized);
         if (!cancelled) { setDevices(merged); setError(''); }
       })
@@ -220,7 +222,8 @@ export default function DeviceConnections() {
     const id = setInterval(async () => {
       try {
         const rows = await modbusApi.getDevices();
-        const normalized = (rows ?? []).map(normalizeDevice);
+        // One row per PHYSICAL device (rows sharing a did / IP:port collapse).
+        const normalized = dedupeByConnection((rows ?? []).map(normalizeDevice));
         const merged = await mergeDatakomStatus(normalized);
         setDevices(merged);
       } catch { /* ignore transient errors */ }
